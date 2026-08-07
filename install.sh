@@ -37,6 +37,7 @@ FLYLINE_BASHRC_MARKER="# Flyline - enhanced Bash experience"
 FLYLINE_ZSHRC_START="# >>> flyline start >>>"
 FLYLINE_ZSHRC_END="# <<< flyline end <<<"
 STANDALONE_BIN="flyline-standalone"
+FISH_CONFD="${XDG_CONFIG_HOME:-${HOME}/.config}/fish/conf.d/flyline.fish"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -312,6 +313,57 @@ install_zsh_integration() {
     ensure_zshrc_block
 }
 
+has_fish() {
+    command -v fish >/dev/null 2>&1
+}
+
+# Release installs ship scripts/flyline.fish inside the archive, so it is already
+# under INSTALL_DIR/scripts after tar extraction. Missing means a bad archive.
+install_flyline_fish_script() {
+    dest="${INSTALL_DIR}/scripts/flyline.fish"
+    if [ -f "$dest" ]; then
+        return
+    fi
+    err "Packaged scripts/flyline.fish not found in ${INSTALL_DIR}/scripts. The release archive is expected to contain scripts/flyline.fish."
+}
+
+# Write the conf.d loader (fish auto-sources conf.d — no config.fish edits, so
+# no backup is needed; the file is entirely flyline-owned and safe to overwrite).
+write_fish_confd() {
+    mkdir -p "$(dirname "$FISH_CONFD")"
+    cat > "$FISH_CONFD" <<EOF
+# >>> flyline start >>>
+set -gx FLYLINE_BIN "${INSTALL_DIR}/${STANDALONE_BIN}"
+test -r "${INSTALL_DIR}/scripts/flyline.fish"; and source "${INSTALL_DIR}/scripts/flyline.fish"
+# <<< flyline end <<<
+EOF
+    say "Wrote fish loader: ${FISH_CONFD}"
+}
+
+install_fish_integration() {
+    if ! has_fish; then
+        return
+    fi
+
+    install_flyline_fish_script
+
+    standalone_path="${INSTALL_DIR}/${STANDALONE_BIN}"
+    if [ -f "$standalone_path" ]; then
+        chmod +x "$standalone_path"
+        say "Installed fish editor: ${standalone_path}"
+    else
+        warn "fish detected but ${standalone_path} is not installed yet."
+        warn "Fish integration will stay disabled until the standalone binary is available."
+    fi
+
+    write_fish_confd
+}
+
+remove_fish_integration() {
+    rm -f "$FISH_CONFD"
+    say "Removed fish conf.d loader (if present)"
+}
+
 # Append the guarded flyline block to ~/.zshrc (idempotent; backs up first).
 ensure_zshrc_block() {
     if zshrc_has_flyline_block; then
@@ -404,6 +456,9 @@ local_main() {
     if [ ! -f "${REPO_DIR}/scripts/flyline.zsh" ]; then
         err "Cannot find ${REPO_DIR}/scripts/flyline.zsh (run --local from the flyline checkout)."
     fi
+    if [ ! -f "${REPO_DIR}/scripts/flyline.fish" ]; then
+        err "Cannot find ${REPO_DIR}/scripts/flyline.fish (run --local from the flyline checkout)."
+    fi
 
     mkdir -p "$INSTALL_DIR" "${INSTALL_DIR}/scripts"
 
@@ -420,17 +475,29 @@ local_main() {
 
     ln -sf "${REPO_DIR}/scripts/flyline.zsh" "${INSTALL_DIR}/scripts/flyline.zsh"
     say "Linked ${INSTALL_DIR}/scripts/flyline.zsh -> ${REPO_DIR}/scripts/flyline.zsh"
+    ln -sf "${REPO_DIR}/scripts/flyline.fish" "${INSTALL_DIR}/scripts/flyline.fish"
+    say "Linked ${INSTALL_DIR}/scripts/flyline.fish -> ${REPO_DIR}/scripts/flyline.fish"
 
-    if ! has_zsh; then
-        warn "zsh not found on PATH; installed files but skipped ~/.zshrc integration."
+    if ! has_zsh && ! has_fish; then
+        warn "Neither zsh nor fish found on PATH; installed files but skipped shell integration."
         return
     fi
 
-    ensure_zshrc_block
+    if has_zsh; then
+        ensure_zshrc_block
+    fi
+    if has_fish; then
+        write_fish_confd
+    fi
 
     say ""
     say "Local install complete."
-    say "    Activate now:        exec zsh"
+    if has_zsh; then
+        say "    Activate now (zsh):  exec zsh"
+    fi
+    if has_fish; then
+        say "    Activate now (fish): exec fish"
+    fi
     say "    Run the tutorial:    flyline run-tutorial"
     say "    Disable in session:  flyline_disable"
     say "    Uninstall:           sh install.sh --uninstall"
@@ -441,6 +508,7 @@ uninstall_main() {
     say "Uninstalling flyline..."
     remove_zshrc_flyline_block
     remove_bashrc_flyline_lines
+    remove_fish_integration
 
     # These generically named license files are part of the release archive.
     # Only remove them when the adjacent flyline provenance file confirms this
@@ -454,6 +522,7 @@ uninstall_main() {
     for path in \
         "${INSTALL_DIR}/${STANDALONE_BIN}" \
         "${INSTALL_DIR}/scripts/flyline.zsh" \
+        "${INSTALL_DIR}/scripts/flyline.fish" \
         "${INSTALL_DIR}/libflyline.so" \
         "${INSTALL_DIR}"/libflyline.so.* \
         "${INSTALL_DIR}/libflyline.dylib" \
@@ -469,7 +538,7 @@ uninstall_main() {
     fi
     rmdir "${INSTALL_DIR}/scripts" 2>/dev/null || true
     if $removed_files; then
-        say "Removed flyline executables, libraries, integration script, and release metadata from ${INSTALL_DIR}"
+        say "Removed flyline executables, libraries, integration scripts, and release metadata from ${INSTALL_DIR}"
     else
         say "No installed flyline files were found in ${INSTALL_DIR}"
     fi
@@ -478,6 +547,7 @@ uninstall_main() {
     say "Uninstall complete. Existing shells keep already-loaded commands until they are restarted."
     say "    zsh: open a new terminal, or run:"
     say "         unfunction flyline flyline_enable flyline_disable flyline_uninstall _flyline_edit 2>/dev/null"
+    say "    fish: open a new terminal, or run: flyline_uninstall"
     say "    Bash: open a new terminal, or run:"
     say "          enable -d flyline"
 }
@@ -637,6 +707,7 @@ main() {
     fi
 
     install_zsh_integration
+    install_fish_integration
 
     # Update or add 'enable -f ... flyline' in ~/.bashrc when this platform's
     # Bash can load the packaged builtin.
@@ -695,6 +766,9 @@ main() {
         fi
         if has_zsh && [ -f "${INSTALL_DIR}/${STANDALONE_BIN}" ]; then
             say '    For zsh, open a new terminal (or run: exec zsh).'
+        fi
+        if has_fish && [ -f "${INSTALL_DIR}/${STANDALONE_BIN}" ]; then
+            say '    For fish, open a new terminal (or run: exec fish).'
         fi
         say '    Or open a new terminal and run the tutorial:'
         say "        flyline run-tutorial"

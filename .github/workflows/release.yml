@@ -315,10 +315,11 @@ jobs:
 
           # Versioned loadable library (install.sh symlinks libflyline.<ext> -> this).
           cp "$rel_dir/${LIB}" "$stage/${lib_versioned}"
-          # Standalone editor binary (zsh host).
+          # Standalone editor binary (zsh/fish host).
           cp "$rel_dir/flyline-standalone" "$stage/flyline-standalone"
           # Shell integration + licences + upstream provenance.
           cp scripts/flyline.zsh "$stage/scripts/flyline.zsh"
+          cp scripts/flyline.fish "$stage/scripts/flyline.fish"
           cp LICENSE-MIT LICENSE-GPLv3 UPSTREAM_BASE.toml "$stage/"
 
           archive="libflyline-${TAG}-${TARGET}${SUFFIX}.tar.gz"
@@ -411,8 +412,10 @@ jobs:
           - { target: install-test-arch,          runner: ubuntu-latest,   label: arch-x86_64,     dep_cache_target: "",                          dep_cache_scope: "" }
           - { target: install-test-bash-3-2-57,   runner: ubuntu-latest,   label: bash-3.2-x86_64, dep_cache_target: specific-bash-version-3_2_57, dep_cache_scope: bash-3_2_57 }
           - { target: install-test-release-zsh,   runner: ubuntu-latest,   label: zsh-x86_64,      dep_cache_target: "",                          dep_cache_scope: "" }
+          - { target: install-test-release-fish,  runner: ubuntu-latest,   label: fish-x86_64,     dep_cache_target: "",                          dep_cache_scope: "" }
           - { target: install-test-ubuntu,        runner: ubuntu-24.04-arm, label: ubuntu-arm64,   dep_cache_target: "",                          dep_cache_scope: "" }
           - { target: install-test-release-zsh,   runner: ubuntu-24.04-arm, label: zsh-arm64,      dep_cache_target: "",                          dep_cache_scope: "" }
+          - { target: install-test-release-fish,  runner: ubuntu-24.04-arm, label: fish-arm64,     dep_cache_target: "",                          dep_cache_scope: "" }
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -441,6 +444,7 @@ jobs:
           mkdir -p "$dest/scripts"
           cp install.sh "$dest/install.sh"
           cp scripts/flyline.zsh "$dest/scripts/flyline.zsh"
+          cp scripts/flyline.fish "$dest/scripts/flyline.fish"
           # Archives, checksums and SBOM flattened from the downloaded artifacts.
           find downloaded-assets -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.spdx.json' \) \
             -exec cp {} "$dest/" \;

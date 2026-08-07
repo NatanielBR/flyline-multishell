@@ -1,5 +1,5 @@
 //! Host shell abstraction. `ShellBackend` is the seam over the original Bash
-//! `bash_funcs` FFI that lets a second host (zsh) plug in: the app talks to
+//! `bash_funcs` FFI that lets a second host (zsh, fish) plug in: the app talks to
 //! `shell::backend()` instead of Bash-specific free functions.
 
 use std::path::PathBuf;
@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 pub use crate::bash_funcs::{CommandWordInfo, ProgrammableCompleteReturn};
 
+pub mod fish;
 pub mod zsh;
 
 /// One entry from the host shell's in-memory command history.
@@ -507,15 +508,23 @@ pub fn is_zsh_host_env() -> bool {
     std::env::var("FLYLINE_HOST").as_deref() == Ok("zsh")
 }
 
+/// True when `FLYLINE_HOST=fish` selects the standalone fish backend.
+pub fn is_fish_host_env() -> bool {
+    std::env::var("FLYLINE_HOST").as_deref() == Ok("fish")
+}
+
 fn init_backend() -> &'static dyn ShellBackend {
     if is_zsh_host_env() {
         &zsh::ZSH_BACKEND
+    } else if is_fish_host_env() {
+        &fish::FISH_BACKEND
     } else {
         &BASH
     }
 }
 
-/// The active host shell backend. Defaults to Bash unless `FLYLINE_HOST=zsh`.
+/// The active host shell backend. Defaults to Bash unless `FLYLINE_HOST` selects
+/// a standalone host (`zsh` or `fish`).
 pub fn backend() -> &'static dyn ShellBackend {
     *ACTIVE.get_or_init(init_backend)
 }

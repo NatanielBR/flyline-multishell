@@ -1,14 +1,18 @@
-//! Standalone flyline editor for zsh host integration.
+//! Standalone flyline editor for zsh and fish host integration.
 //!
-//! Launched from the `zle-line-init` widget in `scripts/flyline.zsh`. Draws the
-//! TUI on `/dev/tty` and writes the accepted command line to fd 3. Exit codes:
+//! Launched from the `zle-line-init` widget in `scripts/flyline.zsh` or the
+//! `fish_prompt` event handler in `scripts/flyline.fish` (`FLYLINE_HOST`
+//! selects the backend; defaults to zsh when unset for broker compatibility).
+//! Draws the TUI on `/dev/tty` and writes the accepted command line to fd 3.
+//! Exit codes:
 //!   0   — command accepted
 //!   130 — cancelled (Ctrl-C / empty abort)
 //!   1   — EOF or internal error
 
 use flyline::{
-    ExitState, StandaloneTerminalGuard, ZSH_BACKEND, backend, get_command, init_standalone_logging,
-    run_comp_broker, run_flyline_command, set_backend, set_cloexec,
+    ExitState, FISH_BACKEND, StandaloneTerminalGuard, ZSH_BACKEND, backend, get_command,
+    init_standalone_logging, is_fish_host_env, run_comp_broker, run_flyline_command, set_backend,
+    set_cloexec,
 };
 
 fn catch_unwind_safe<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
@@ -19,7 +23,7 @@ fn write_command_fd3(cmd: &str) {
     use std::io::Write;
     use std::os::fd::{FromRawFd, RawFd};
 
-    // ponytail: fd 3 is owned by the zsh parent; never close it on drop.
+    // ponytail: fd 3 is owned by the host shell parent; never close it on drop.
     let fd = RawFd::from(3);
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
     let _ = file.write_all(cmd.as_bytes());
@@ -30,17 +34,24 @@ fn write_command_fd3(cmd: &str) {
 fn run() -> i32 {
     // Broker mode: serve completions over a Unix socket instead of editing a line.
     // Detached from the tty, so it must not touch fd 3 or FLYLINE_HOST/UI state.
+    // The completion broker is zsh-only (fish completions are headless `fish -c`).
     if let Some(sock) = std::env::var_os("FLYLINE_COMP_BROKER") {
         set_backend(&ZSH_BACKEND);
         let _ = init_standalone_logging();
         return run_comp_broker(std::path::Path::new(&sock));
     }
 
+    // Widget sets FLYLINE_HOST before launch. Default to zsh when unset so older
+    // widgets / broker helpers keep working.
     // SAFETY: standalone is a fresh process; no other threads read these yet.
-    unsafe {
-        std::env::set_var("FLYLINE_HOST", "zsh");
+    if is_fish_host_env() {
+        set_backend(&FISH_BACKEND);
+    } else {
+        unsafe {
+            std::env::set_var("FLYLINE_HOST", "zsh");
+        }
+        set_backend(&ZSH_BACKEND);
     }
-    set_backend(&ZSH_BACKEND);
 
     // Subcommand dispatch: `flyline <args>` (invoked via the shell forwarding
     // function) runs the same CLI as the Bash builtin against the persisted
@@ -78,13 +89,13 @@ fn run() -> i32 {
 
     // Claim the controlling terminal's foreground process group before drawing.
     // Without this, a wrong foreground group at launch (seen right after a
-    // re-install, when `exec zsh` restarts the shell alongside orphaned helper
-    // daemons) makes the first tty write raise SIGTTOU and stops us forever,
-    // hanging the parent shell. The guard also installs fatal-signal handlers
-    // that restore the terminal (raw mode, mouse tracking, ...) if the editor is
-    // killed, so it never leaves the tty in a mode that leaks into later shells.
-    // The Bash builtin gets both for free via Bash. Held until the editor
-    // returns, then dropped.
+    // re-install, when `exec zsh`/`exec fish` restarts the shell alongside
+    // orphaned helper daemons) makes the first tty write raise SIGTTOU and stops
+    // us forever, hanging the parent shell. The guard also installs fatal-signal
+    // handlers that restore the terminal (raw mode, mouse tracking, ...) if the
+    // editor is killed, so it never leaves the tty in a mode that leaks into
+    // later shells. The Bash builtin gets both for free via Bash. Held until the
+    // editor returns, then dropped.
     let _terminal_guard = StandaloneTerminalGuard::install(settings.enable_extended_key_codes);
 
     let exit_code = match get_command(&mut settings) {

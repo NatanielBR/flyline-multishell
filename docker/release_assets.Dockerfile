@@ -8,8 +8,9 @@
 #
 # Produced archive members (top level of the tarball):
 #   libflyline.so.<version_no_v>   (versioned loadable library)
-#   flyline-standalone             (zsh editor binary)
+#   flyline-standalone             (standalone editor binary)
 #   scripts/flyline.zsh            (zsh integration script)
+#   scripts/flyline.fish           (fish integration script)
 #   LICENSE-MIT
 #   LICENSE-GPLv3
 #   UPSTREAM_BASE.toml             (fork provenance metadata)
@@ -32,6 +33,7 @@ WORKDIR /stage
 COPY --from=built-artifact /libflyline.so ./lib_src
 COPY --from=built-artifact /flyline-standalone ./flyline-standalone
 COPY scripts/flyline.zsh ./scripts/flyline.zsh
+COPY scripts/flyline.fish ./scripts/flyline.fish
 COPY LICENSE-MIT ./LICENSE-MIT
 COPY LICENSE-GPLv3 ./LICENSE-GPLv3
 COPY UPSTREAM_BASE.toml ./UPSTREAM_BASE.toml
@@ -51,6 +53,7 @@ RUN set -eu; \
         "${lib_versioned}" \
         flyline-standalone \
         scripts/flyline.zsh \
+        scripts/flyline.fish \
         LICENSE-MIT \
         LICENSE-GPLv3 \
         UPSTREAM_BASE.toml; \

@@ -132,6 +132,28 @@ jobs:
             *.cache-from=type=gha,scope=ci-builder-arm64
             ${{ needs.meta.outputs.trusted == 'true' && '*.cache-to=type=gha,scope=ci-builder-arm64,mode=max' || '' }}
 
+  # Fish integration coverage. Uses a Python pty driver (fish has no zpty).
+  fish-integration-tests:
+    name: Fish integration tests (ARM64)
+    runs-on: ubuntu-24.04-arm
+    needs:
+      - meta
+      - build-ubuntu-1604
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Run fish integration tests
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7
+        with:
+          files: docker-bake.hcl
+          targets: fish-integration-test
+          set: |
+            *.cache-from=type=gha,scope=ci-builder-arm64
+            ${{ needs.meta.outputs.trusted == 'true' && '*.cache-to=type=gha,scope=ci-builder-arm64,mode=max' || '' }}
+
   bash-integration-tests:
     name: Bash integration tests using built library
     runs-on: ubuntu-latest

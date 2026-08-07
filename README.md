@@ -104,6 +104,49 @@ commands it prints) to unload commands that are already in memory.
 - **One-time rc boot cost.** Loading a heavy `~/.zshrc` (e.g. powerlevel10k) adds ~1–2s when the completion daemon first starts; the persistent daemon amortizes it across the session. `FLYLINE_ZSH_NO_RCS=1` avoids it.
 - **Variable introspection is partial.** Variable tooltips and `$VAR` completion use a per-call `zsh -f`, so they see exported environment variables but not unexported shell parameters.
 
+#### Fish integration details
+
+The same `install.sh` also sets up fish when `fish` is on your `PATH`: it installs `flyline-standalone` under `~/.local/lib` (or `FLYLINE_INSTALL_DIR`), drops `scripts/flyline.fish` there, and writes a loader to `~/.config/fish/conf.d/flyline.fish` (fish auto-sources `conf.d` — your `config.fish` is never touched):
+
+```fish
+# >>> flyline start >>>
+set -gx FLYLINE_BIN "$HOME/.local/lib/flyline-standalone"
+test -r "$HOME/.local/lib/scripts/flyline.fish"; and source "$HOME/.local/lib/scripts/flyline.fish"
+# <<< flyline end <<<
+```
+
+**Enable / disable (current shell):**
+
+```fish
+flyline_enable    # turn flyline on (already on after install)
+flyline_disable   # restore native fish line editing for this session
+```
+
+**Uninstall:**
+
+```fish
+flyline_uninstall   # disable flyline and unset FLYLINE_BIN in this session
+```
+
+```sh
+sh install.sh --uninstall   # remove conf.d/flyline.fish, flyline-standalone, and scripts/flyline.fish
+```
+
+**Fail-open:** flyline runs as a separate process from a `fish_prompt` event handler. If the binary is missing, you cancel, or flyline crashes, fish falls back to native line editing for that line — your shell keeps working.
+
+**Completions reuse your fish setup.** flyline asks `fish -c 'complete --do-complete=…'` for completions, so it completes exactly what your interactive fish does — including descriptions — with your config and completion files loaded. Unlike zsh, fish exposes its completion engine headlessly, so there is no persistent daemon or broker: each request is a fresh ~10–30ms `fish` call.
+
+**Prompts come pre-rendered.** fish prompts are functions, so the widget captures `fish_prompt`/`fish_right_prompt` output (ANSI included) and hands it to flyline — starship, tide, and hand-rolled prompts all work without special-casing.
+
+**flycomp** uses fish's native completion dialect (`OutputFormat::Fish`) and writes to `~/.config/fish/completions/<cmd>.fish`. Because each Tab already runs a fresh `fish -c`, writing the file is enough to activate it (no daemon reload).
+
+##### Fish limitations
+
+- **History is file-mediated.** The widget runs `history save` before launching flyline, which then reads the session's history file — recent commands are visible, but this is not a live read of the parent shell's in-memory list.
+- **Variable introspection is partial.** Variable tooltips and `$VAR` completion use a per-call `fish -c`, so they see exported and universal variables but not unexported globals of the parent session.
+- **Abbreviations don't expand inline.** `abbr` expansions are shown as alias tooltips and used for completion lookup, but typing an abbreviation in flyline inserts it literally.
+- **fish's prompt-time terminal queries are disabled while flyline is on.** fish 4.x sends blocking terminal queries (cursor position, background color) around each prompt and hard-`assert!`s if one is still pending when the next is issued (`reader.rs`, `query.is_none()`) — a TUI taking the tty from a `fish_prompt` handler consumes the reply under real terminal latency and crashes fish itself (reproduced with ≥300ms reply lag; guarded by a regression test). The widget therefore sets `FISH_TEST_NO_RECURRENT_QUERIES` while enabled and clears it on `flyline_disable`. Practical cost: fish's automatic light/dark background detection pauses while flyline is active. Accepted lines execute via a signal-deferred `commandline -f execute` (with queries off, fish's reader only drains queued readline functions when woken).
+
 ### Arch Linux
 
 The existing [`flyline` AUR package](https://aur.archlinux.org/packages/flyline)
@@ -115,8 +158,8 @@ Until a fork-specific AUR package is available, use the
 
 Download the archive and matching `.sha256` file for your target from the
 [releases page](https://github.com/conall88/flyline-multishell/releases).
-Each archive includes both the Bash loadable library and the zsh standalone
-binary and integration script.
+Each archive includes the Bash loadable library, the standalone editor binary,
+and the zsh/fish integration scripts.
 
 After extracting it:
 
@@ -124,13 +167,16 @@ After extracting it:
   `enable -f /path/to/library flyline`.
 - zsh: set `FLYLINE_BIN` to the extracted `flyline-standalone` binary and
   source the extracted `scripts/flyline.zsh`.
+- fish: set `FLYLINE_BIN` to the extracted `flyline-standalone` binary and
+  source the extracted `scripts/flyline.fish` (or copy the conf.d loader from
+  the [Fish integration details](#fish-integration-details) section).
 
 For automatic target selection, checksum verification, and shell
 configuration, prefer the [quick install](#quick-install).
 
 ### Build from source
 
-Clone the repository and build both the Bash library and standalone zsh binary:
+Clone the repository and build both the Bash library and standalone editor:
 
 ```bash
 cargo build --features standalone
@@ -148,6 +194,14 @@ For zsh:
 ```zsh
 export FLYLINE_BIN=/path/to/flyline_checkout/target/debug/flyline-standalone
 source /path/to/flyline_checkout/scripts/flyline.zsh
+flyline run-tutorial
+```
+
+For fish:
+
+```fish
+set -gx FLYLINE_BIN /path/to/flyline_checkout/target/debug/flyline-standalone
+source /path/to/flyline_checkout/scripts/flyline.fish
 flyline run-tutorial
 ```
 
