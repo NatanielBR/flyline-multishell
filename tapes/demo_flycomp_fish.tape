@@ -21,7 +21,8 @@ Enter
 Sleep 1000ms
 Show
 
-Sleep 800ms
+# Leave the caption on screen long enough to read.
+Sleep 5000ms
 Type "claude "
 Sleep 1200ms
 Escape
