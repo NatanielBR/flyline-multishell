@@ -446,6 +446,9 @@ local_main() {
     else
         DIST_DIR="${REPO_DIR}/target/debug"
     fi
+    # Symlinks must be absolute: INSTALL_DIR is not the cwd, so a relative
+    # DIST_DIR like `target/release` would resolve under INSTALL_DIR instead.
+    DIST_DIR="$(CDPATH='' cd -- "$DIST_DIR" && pwd)"
 
     standalone_src="${DIST_DIR}/${STANDALONE_BIN}"
     if [ ! -x "$standalone_src" ]; then

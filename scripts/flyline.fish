@@ -7,6 +7,7 @@
 if status is-interactive; and not set -q _flyline_loaded
     set -g _flyline_loaded 1
     set -g _flyline_script (status filename)
+    set -g _flyline_pending ''
 
     # Default to flyline-standalone next to the install dir (parent of scripts/).
     if not set -q FLYLINE_BIN
@@ -31,17 +32,27 @@ if status is-interactive; and not set -q _flyline_loaded
     # renders the command line, fish loses nothing it uses.
     set -g FISH_TEST_NO_RECURRENT_QUERIES 1
 
-    # With queries disabled, fish's reader blocks on tty input and drains
-    # queued readline functions only when something wakes it — so an
-    # `execute` queued from this event handler would sit until the next
-    # keypress. A signal wakes the reader; its handler runs `execute` with
-    # the reader active, which fish processes immediately.
+    # After fish_prompt returns, fish clears the commandline before the next
+    # read — so a deferred `commandline -f execute` is a no-op. Stash the
+    # accepted line and eval it from a signal handler that runs once the
+    # reader is active again (also required with queries disabled on fish 4.x).
     function _flyline_do_execute --on-signal SIGUSR2
-        commandline -f execute
+        if test -n "$_flyline_pending"
+            set -l to_run $_flyline_pending
+            set -g _flyline_pending ''
+            set -e _flyline_busy
+            eval $to_run
+            commandline -f repaint
+        end
     end
 
     function _flyline_edit --on-event fish_prompt
         set -l last_exit $status # capture before anything clobbers $status
+        # Skip while a deferred execute is outstanding (avoids re-entering
+        # flyline before the accepted line has run).
+        if set -q _flyline_busy
+            return 0
+        end
         test -x "$FLYLINE_BIN"; or return 0 # fail open
 
         # flyline reads history from the fish history file; flush this session's
@@ -70,8 +81,8 @@ if status is-interactive; and not set -q _flyline_loaded
         if test $rc -eq 0
             # Accept even when empty, so the prompt event re-fires and
             # relaunches flyline (matches the zsh widget's behaviour).
-            # Execution is signal-deferred: see _flyline_do_execute above.
-            commandline -r -- $cmd
+            set -g _flyline_pending $cmd
+            set -g _flyline_busy 1
             command fish -c "sleep 0.05; kill -USR2 $fish_pid" &
             builtin disown 2>/dev/null
         else if test $rc -eq 130
@@ -86,6 +97,8 @@ if status is-interactive; and not set -q _flyline_loaded
 
     function flyline_enable
         set -e _flyline_loaded
+        set -e _flyline_busy
+        set -g _flyline_pending ''
         source $_flyline_script
     end
 
@@ -94,6 +107,8 @@ if status is-interactive; and not set -q _flyline_loaded
         functions -e _flyline_do_execute
         functions -e flyline
         set -e _flyline_loaded
+        set -e _flyline_busy
+        set -g _flyline_pending ''
         set -e FISH_TEST_NO_RECURRENT_QUERIES
     end
 

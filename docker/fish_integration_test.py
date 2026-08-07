@@ -67,11 +67,11 @@ def run_shell(env_overrides, lines, secs_per_line=1.5, reply_delay=0.0):
             if b"\x1b]11;?" in chunk:
                 pending.append((now + reply_delay, b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\"))
 
-    pump(2.0)
+    pump(3.0)
     for line in lines:
         os.write(fd, line.encode() + b"\r")
         pump(secs_per_line)
-    pump(1.0)
+    pump(2.0)
 
     try:
         os.kill(pid, 9)
