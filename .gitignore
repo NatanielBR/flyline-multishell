@@ -5,3 +5,5 @@ target/
 docker_build/
 **/.antigravitycli/
 .vscode/
+docker/build-release-assets/*.tar.gz
+docker/build-release-assets/*.sha256

@@ -195,6 +195,15 @@ target "zsh-integration-test" {
     dockerfile = "docker/zsh_integration_test.Dockerfile"
 }
 
+target "fish-integration-test" {
+    context = "."
+    contexts = {
+        # same artifact as zsh: libflyline.so + flyline-standalone
+        built-artifact = "target:extract-zsh-integration-test-build-artifact"
+    }
+    dockerfile = "docker/fish_integration_test.Dockerfile"
+}
+
 
 
 
@@ -381,6 +390,17 @@ target "install-test-release-zsh" {
     }
 }
 
+# Release-install fish validation (same shape as zsh).
+target "install-test-release-fish" {
+    context = "."
+    dockerfile = "docker/install_test_fish.Dockerfile"
+    args = {
+        FLYLINE_REPO = FLYLINE_REPO
+        FLYLINE_INSTALL_VERSION = FLYLINE_INSTALL_VERSION
+        FLYLINE_ASSET_BASE = FLYLINE_ASSET_BASE
+    }
+}
+
 # ---- Local-asset variants (consume docker/build-release-assets) ----
 
 target "install-test-ubuntu-local" {
@@ -407,6 +427,14 @@ target "install-test-release-zsh-local" {
     }
 }
 
+target "install-test-release-fish-local" {
+    inherits = ["install-test-release-fish"]
+    args = {
+        FLYLINE_INSTALL_VERSION = LOCAL_ASSET_VERSION
+        FLYLINE_ASSET_BASE = LOCAL_ASSET_DIR
+    }
+}
+
 group "install-tests" {
     targets = [
         "install-test-alpine",
@@ -414,6 +442,7 @@ group "install-tests" {
         "install-test-arch",
         "install-test-bash-3-2-57",
         "install-test-release-zsh",
+        "install-test-release-fish",
     ]
 }
 
@@ -425,16 +454,18 @@ group "install-tests-local" {
         "install-test-ubuntu-local",
         "install-test-arch-local",
         "install-test-release-zsh-local",
+        "install-test-release-fish-local",
     ]
 }
 
 # Native ARM hosts cannot run the official Arch Linux image (it is x86_64-only).
-# This group exercises the portable GNU/Linux and zsh release-install paths on
-# Apple Silicon and GitHub's ubuntu-24.04-arm runners.
+# This group exercises the portable GNU/Linux and zsh/fish release-install paths
+# on Apple Silicon and GitHub's ubuntu-24.04-arm runners.
 group "install-tests-local-arm64" {
     targets = [
         "install-test-ubuntu-local",
         "install-test-release-zsh-local",
+        "install-test-release-fish-local",
     ]
 }
 

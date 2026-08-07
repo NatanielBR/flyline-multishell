@@ -400,6 +400,11 @@ impl Settings {
         crate::shell::is_zsh_host_env()
     }
 
+    /// True when flyline runs as the standalone fish line editor (`FLYLINE_HOST=fish`).
+    pub fn is_fish_host() -> bool {
+        crate::shell::is_fish_host_env()
+    }
+
     /// Advance the interactive tutorial when the user submits an empty command
     /// while a tutorial step is active, disabling the tutorial once it ends.
     ///

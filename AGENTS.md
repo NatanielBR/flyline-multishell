@@ -35,11 +35,26 @@ cargo fmt
 > [!TIP]
 > Avoid running the full `cargo test` suite locally. The integration tests (`tests/docker_integration_tests.rs`) spawn Docker containers testing multiple versions of Bash, which is extremely slow. Prefer running `cargo test --lib` or testing specific packages.
 
-## Guidelines
-1. **Safety & Stability**: `flyline` runs inside the active shell process. Avoid unwinding panics across the C FFI boundary; wrap entry points in `catch_unwind_safe` to prevent shell crashes. Never create an `App` instance in library unit tests, as `App` depends on global FFI symbols (like `history_list` or `current_readline_prompt`) that are only resolved dynamically when loaded inside Bash, causing linker failures in library test targets.
-2. **Terminal Rendering**: Uses `ratatui` to draw suggestions, widgets, and tooltips. Ensure components handle narrow or resizing terminal viewports gracefully.
-3. **Interactive UI via Tagged Cells**: To map terminal mouse coordinates to actions, `flyline` uses `TaggedCell` ([src/content_builder.rs](src/content_builder.rs#L193)) in its rendering buffer `Contents` ([src/content_builder.rs](src/content_builder.rs#L214)).
-   * Each cell associates a `ratatui::buffer::Cell` with a `Tag` enum (e.g., `Tag::Command`, `Tag::Suggestion`, `Tag::TutorialNext`).
-   * Use `get_tagged_cell` in [src/app/mod.rs](src/app/mod.rs#L355) to map mouse events (`column`, `row`) to interactive components.
-   * When drawing clickable elements or widgets, ensure they are written using tagged methods (like `write_tagged_span` or `write_tagged_line`).
+## Cursor Cloud specific instructions
+
+### Docker in this environment
+Cloud Agents run Docker inside another container. For bake/integration tests (`docker buildx bake …`), configure the daemon with **fuse-overlayfs** and **iptables-legacy** before starting it — plain `overlayfs`/`vfs` often fails with `invalid argument` on BuildKit mounts. See [Running Docker](https://cursor.com/docs/cloud-agent/setup#running-docker).
+
+```bash
+sudo apt-get install -y fuse-overlayfs iptables docker.io docker-buildx
+sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' | sudo tee /etc/docker/daemon.json
+sudo dockerd --host=unix:///var/run/docker.sock &
+# or: sudo service docker start  (once the daemon.json is in place)
+sudo chmod 666 /var/run/docker.sock   # if the agent user is not in group docker yet
+```
+
+### Fish / zsh local smoke
+```bash
+cargo build --release --features standalone
+sh install.sh --local target/release
+docker buildx bake -f docker-bake.hcl fish-integration-test
+docker buildx bake -f docker-bake.hcl zsh-integration-test
+```
 
