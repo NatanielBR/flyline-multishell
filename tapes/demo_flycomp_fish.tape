@@ -12,13 +12,13 @@ Hide
 Sleep 2500ms
 Type@40ms ` clear`
 Enter
-Sleep 1000ms
+Sleep 1200ms
 Show
 
 Hide
 Type@40ms ` clear && echo "zsh/fish: Esc dismisses generic file completions, then Tab offers flycomp:" && echo ""`
 Enter
-Sleep 800ms
+Sleep 1000ms
 Show
 
 Sleep 800ms
@@ -29,4 +29,4 @@ Sleep 600ms
 Tab
 Sleep 3000ms
 Enter
-Sleep 4000ms
+Sleep 8000ms
