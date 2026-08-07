@@ -14,7 +14,7 @@
 
 </div>
 
-> **Note:** `flyline-multishell` is the repository and release name for this fork. The CLI command, loadable builtin, standalone binary, environment variables, and config paths all remain named `flyline` / `flyline-standalone` / `FLYLINE_*` — you still type `flyline` in your shell.
+> **Note:** `flyline-multishell` is a fork of [flyline](https://github.com/HalFrgrd/flyline) that adds support for additional shell backends (the original project supports Bash only). The CLI command, loadable builtin, standalone binary, environment variables, and config paths all remain named `flyline` / `flyline-standalone` / `FLYLINE_*` — you still type `flyline` in your shell.
 
 Flyline replaces the host shell's default line editor with a richer editing experience:
 
@@ -871,6 +871,10 @@ Demo recordings are [evp](https://github.com/HalFrgrd/evp) `.tape` scripts under
 docker buildx bake -f docker-bake.hcl demos
 # or a single target, e.g. demo-flycomp-fish-extracted
 ```
+
+# Credits
+
+Built on [flyline](https://github.com/HalFrgrd/flyline) by [HalFrgrd](https://github.com/HalFrgrd) (Bash-only upstream). This fork keeps the same command and config names so docs and muscle memory transfer. Related upstream work we depend on: [flycomp](https://github.com/HalFrgrd/flycomp) (completion synthesis) and [evp](https://github.com/HalFrgrd/evp) (demo recordings). The current upstream base is recorded in [`UPSTREAM_BASE.toml`](UPSTREAM_BASE.toml).
 
 # Licensing
 
