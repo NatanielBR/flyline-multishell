@@ -7,7 +7,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/conall88/flyline-multishell)](https://github.com/conall88/flyline-multishell/releases)
 [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
-**A Bash and Zsh plugin for modern command line editing.**
+**A modern line editor for Bash, zsh, and fish.**
 
 
 [![Demo](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_overview.gif)](https://github.com/HalFrgrd/evp)
@@ -16,21 +16,27 @@
 
 > **Note:** `flyline-multishell` is the repository and release name for this fork. The CLI command, loadable builtin, standalone binary, environment variables, and config paths all remain named `flyline` / `flyline-standalone` / `FLYLINE_*` — you still type `flyline` in your shell.
 
-When Bash prompts you for a command, a library called [readline](https://www.gnu.org/software/bash/manual/html_node/Command-Line-Editing.html) handles your keystrokes. Readline lacks many features users have come to expect. Flyline is a readline replacement that provides an enhanced line editing experience with:
+Flyline replaces the host shell's default line editor with a richer editing experience:
+
+- **Bash:** loadable builtin that replaces [readline](https://www.gnu.org/software/bash/manual/html_node/Command-Line-Editing.html) in-process
+- **zsh / fish:** `flyline-standalone` process driven by a small widget (`scripts/flyline.zsh` / `scripts/flyline.fish`)
+
+Features include:
 - [Intellisense style autosuggestions](#intellisense-style-auto-suggestions)
 - Change directory using your prompt
 - [Rich prompt customizations, (asynchronous widgets), and animations](#rich-prompts)
 - [Fuzzy history searching](#command-history)
 - [Mouse support (click to move cursor, select text)](#mouse-support)
-- [Improvements to Bash's tab completion](#tab-completion-improvements)
+- [Improvements to tab completion](#tab-completion-improvements)
 - [Synthesize tab completion suggestions](#automatic-completion-synthesis-flycomp) with [flycomp](https://github.com/HalFrgrd/flycomp)
 - [Agent assisted command writing](#agent-mode)
 - Tooltips
 - Text selection
 - Auto close brackets and quotes
 - Syntax highlighting
-- Runs in the same process as Bash
 - [Cursor animations and styles](#cursor-animations-and-styles)
+
+Want another shell? The host-specific bits live behind the [`ShellBackend`](src/shell/mod.rs) trait — see [Adding a shell](#adding-a-shell).
 
 Flyline is similar to [ble.sh](https://github.com/akinomyoga/ble.sh) but is written in Rust and uses [ratatui.rs](https://ratatui.rs/) to more easily draw complex user interfaces.
 
@@ -52,7 +58,7 @@ curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/downlo
 ```
 
 The installer selects the correct archive, verifies its checksum, and
-configures Bash and zsh when available. No `sudo` is required. See the
+configures Bash, zsh, and fish when available. No `sudo` is required. See the
 [releases page](https://github.com/conall88/flyline-multishell/releases) for
 specific versions and release notes.
 
@@ -86,7 +92,7 @@ flyline_uninstall   # disable flyline and unset FLYLINE_BIN in this zsh session
 ```
 
 ```sh
-sh install.sh --uninstall   # remove installed files plus Bash and zsh startup integration
+sh install.sh --uninstall   # remove installed files plus Bash, zsh, and fish startup integration
 ```
 
 The script reports exactly what it removed. Restart existing shells (or run the
@@ -551,9 +557,20 @@ ANSI styling is supported in descriptions: any ANSI colour/style escape codes em
 Descriptions for files are the time since last modified.
 
 ### Automatic completion synthesis (flycomp)
-If a command lacks a completion script, flyline can invoke [flycomp](https://github.com/HalFrgrd/flycomp) to dynamically synthesize one by parsing its `--help` outputs and man pages. You type the command name, press Tab, then flyline will prompt you to run flycomp to generate the completion spec:
+If a command lacks a useful completion script, flyline can invoke [flycomp](https://github.com/HalFrgrd/flycomp) to dynamically synthesize one by parsing its `--help` outputs and man pages. flycomp writes the host shell's dialect (Bash compspec, zsh `compdef`, or fish `complete`).
 
-[![Automatic completion synthesis demo](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_flycomp.gif)](https://github.com/HalFrgrd/evp)
+**Bash:** type the command name, press Tab — flyline prompts you to run flycomp:
+
+[![Automatic completion synthesis demo (Bash)](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_flycomp.gif)](https://github.com/HalFrgrd/evp)
+
+**zsh and fish:** Tab often returns *generic file completions* first, which hides the flycomp offer. Dismiss those with Escape, then press Tab again to get the synthesize prompt:
+
+```text
+claude␠ → Esc (dismiss file completions) → Tab → [Yes]
+```
+
+[![flycomp on zsh](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_flycomp_zsh.gif)](https://github.com/HalFrgrd/evp)
+[![flycomp on fish](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_flycomp_fish.gif)](https://github.com/HalFrgrd/evp)
 
 ### `LS_COLORS` styling
 Flyline styles your filename tab completion results according to `$LS_COLORS`:
@@ -567,7 +584,7 @@ Flyline offers a fuzzy history search similar to fzf or skim accessed with `Ctrl
 
 [![Fuzzy history demo](https://github.com/conall88/flyline-multishell/releases/download/assets/demo_fuzzy_history.gif)](https://github.com/HalFrgrd/evp)
 
-You can access a list of commands in the current Bash session that you Ctrl+C'd while editing using `Alt+R`.
+You can access a list of commands in the current session that you Ctrl+C'd while editing using `Alt+R`.
 This is useful if you start writing a command, realise you want to run another command first, but you don't want to lose your first command.
 
 **Inline suggestions:**
@@ -834,6 +851,25 @@ flyline create-prompt-widget leader-mode --name FLYLINE_LEADER_MODE 'LEADER' ''
 
 # And include it in your `PS1`/`RPS1`/`PS1_FILL`:
 export RPS1='FLYLINE_LEADER_MODE'
+```
+
+# Adding a shell
+
+Host-specific behavior is isolated behind [`ShellBackend`](src/shell/mod.rs). Bash (`BashBackend`), zsh (`src/shell/zsh.rs`), and fish (`src/shell/fish.rs`) already implement it. To add another shell:
+
+1. Implement `ShellBackend` (completions, history, env/vars, flycomp dialect + write path, …).
+2. Add a small host widget that launches `flyline-standalone` (see `scripts/flyline.zsh` / `scripts/flyline.fish`).
+3. Wire install (`install.sh`), release packaging, and a Docker integration test (mirror the zsh/fish bake targets).
+
+PRs that stay close to those patterns are easiest to review and keep mergeable with upstream.
+
+# Demo GIFs
+
+Demo recordings are [evp](https://github.com/HalFrgrd/evp) `.tape` scripts under `tapes/`, baked via `docker-bake.hcl` group `demos`, and uploaded to the `assets` GitHub release by the **Generate Demos** workflow (`workflow_dispatch` on `master`).
+
+```bash
+docker buildx bake -f docker-bake.hcl demos
+# or a single target, e.g. demo-flycomp-fish-extracted
 ```
 
 # Licensing

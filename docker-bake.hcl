@@ -228,6 +228,16 @@ target "demo-base" {
     }
 }
 
+# zsh/fish demos: bash demo-base + flyline-standalone + widgets.
+target "demo-base-standalone" {
+    context = "."
+    dockerfile = "docker/demo_base_standalone.Dockerfile"
+    contexts = {
+        demo-base = "target:demo-base"
+        standalone-artifact = "target:extract-zsh-integration-test-build-artifact"
+    }
+}
+
 target "_demo-base" {
     context = "."
     contexts = {
@@ -235,6 +245,17 @@ target "_demo-base" {
     }
     output = ["type=local,dest=./"]
     # Sets the hostname for the build sandbox; used by \h in the PS1 prompt during VHS recording.
+    args = {
+        BUILDKIT_SANDBOX_HOSTNAME = "my-hostname"
+    }
+}
+
+target "_demo-base-standalone" {
+    context = "."
+    contexts = {
+        demo-base-standalone = "target:demo-base-standalone"
+    }
+    output = ["type=local,dest=./"]
     args = {
         BUILDKIT_SANDBOX_HOSTNAME = "my-hostname"
     }
@@ -301,6 +322,16 @@ target "demo-flycomp-extracted" {
     dockerfile = "docker/demo_flycomp.Dockerfile"
 }
 
+target "demo-flycomp-zsh-extracted" {
+    inherits = ["_demo-base-standalone"]
+    dockerfile = "docker/demo_flycomp_zsh.Dockerfile"
+}
+
+target "demo-flycomp-fish-extracted" {
+    inherits = ["_demo-base-standalone"]
+    dockerfile = "docker/demo_flycomp_fish.Dockerfile"
+}
+
 target "demo-cursor-style-extracted" {
     inherits = ["_demo-base"]
     dockerfile = "docker/demo_cursor_style.Dockerfile"
@@ -320,6 +351,8 @@ group "demos" {
         "demo-tab-completion-easing-extracted",
         "demo-auto-tab-completion-extracted",
         "demo-flycomp-extracted",
+        "demo-flycomp-zsh-extracted",
+        "demo-flycomp-fish-extracted",
         "demo-cursor-style-extracted"
     ]
 }

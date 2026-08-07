@@ -18,7 +18,7 @@ Show
 #############################################################################################################
 Hide
 Sleep 1000ms
-Type@40ms ` clear && echo "flyline is a Bash plugin that brings many improvements. For instance, Intellisense style suggestions:" && echo ""`
+Type@40ms ` clear && echo "flyline is a modern line editor for Bash, zsh, and fish. For instance, Intellisense style suggestions:" && echo ""`
 Enter
 Sleep 100ms
 Show
@@ -151,7 +151,7 @@ Enter
 Hide
 Sleep 100ms
 Ctrl+C
-Type@40ms ` clear && echo "flyline's deep Bash integration allows tooltips as you type:" && echo ""`
+Type@40ms ` clear && echo "flyline's deep shell integration allows tooltips as you type:" && echo ""`
 Enter
 Show
 
@@ -202,7 +202,7 @@ Show
 
 Hide
 Ctrl+C
-Type@40ms ` clear && echo "flyline supports code editor-like text selection" && echo "This has nothing to do with the terminal emulator, it's all inside of Bash!" && echo ""`
+Type@40ms ` clear && echo "flyline supports code editor-like text selection" && echo "This has nothing to do with the terminal emulator — flyline draws it itself!" && echo ""`
 Enter
 Show
 

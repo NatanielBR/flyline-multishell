@@ -665,7 +665,7 @@ jobs:
             echo ""
             echo "Multishell fork of flyline (\`${VERSION}\`). This release bundles the Bash"
             echo "loadable builtin **and** the standalone \`flyline-standalone\` binary used by"
-            echo "the zsh integration, for every supported target."
+            echo "the zsh and fish integrations, for every supported target."
             echo ""
             echo "## Changelog"
             echo ""
