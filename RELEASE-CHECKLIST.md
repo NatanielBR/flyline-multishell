@@ -25,10 +25,11 @@ must never trigger this repository's release workflow.
    cargo test --features standalone --test standalone_startup_tests
    cargo test --features standalone --test zsh_completion_tests -- --test-threads=1
    cargo test --features standalone --test zsh_integration_tests -- --test-threads=1
-   docker buildx bake bash-integration-tests zsh-integration-test
+   docker buildx bake bash-integration-tests zsh-integration-test fish-integration-test
    actionlint
    shellcheck install.sh
    zsh -n scripts/flyline.zsh
+   fish -n scripts/flyline.fish
    ```
 
    Clippy warnings must remain visible and be reviewed in the workflow output.
@@ -51,10 +52,11 @@ gh workflow run release.yml \
 
 Inspect the workflow artifacts. Every supported target must have a `.tar.gz`
 archive and `.sha256`; every archive must contain the versioned loadable
-library, `flyline-standalone`, `scripts/flyline.zsh`, both licenses, and
-`UPSTREAM_BASE.toml`. Also inspect the SBOM and confirm all Bash and zsh
-release-install tests passed. Provenance attestations are created only for the
-real tagged run, because a dry run intentionally has no published subjects.
+library, `flyline-standalone`, `scripts/flyline.zsh`, `scripts/flyline.fish`,
+both licenses, and `UPSTREAM_BASE.toml`. Also inspect the SBOM and confirm all
+Bash, zsh, and fish release-install tests passed. Provenance attestations are
+created only for the real tagged run, because a dry run intentionally has no
+published subjects.
 
 ## Create the prerelease
 
@@ -76,7 +78,7 @@ attestations for the published archives.
 
 ## Promote or clean up
 
-After manually installing from the prerelease on Bash and zsh, promote it:
+After manually installing from the prerelease on Bash, zsh, and fish, promote it:
 
 ```bash
 gh release edit multishell-vX.Y.Z --prerelease=false
