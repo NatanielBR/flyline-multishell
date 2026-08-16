@@ -106,7 +106,7 @@ impl TagPattern {
             (TagPattern::TutorialNext, Some(Tag::TutorialNext)) => true,
             (TagPattern::Clipboard, Some(Tag::Clipboard(_))) => true,
             (TagPattern::PromptCopyBuffer, Some(Tag::PromptCopyBufferWidget)) => true,
-            (TagPattern::Ps1PromptCwd, Some(Tag::Ps1PromptCwdWidget(_))) => true,
+            (TagPattern::Ps1PromptCwd, Some(Tag::PromptCwdWidget(_))) => true,
             (TagPattern::FlycompYes, Some(Tag::FlycompYes)) => true,
             (TagPattern::FlycompNo, Some(Tag::FlycompNo)) => true,
             (TagPattern::FlycompShowFiles, Some(Tag::FlycompShowFiles)) => true,
@@ -296,7 +296,7 @@ impl super::ContextVar for MouseContextVar {
                             | Tag::TutorialNext
                             | Tag::PromptCopyBufferWidget
                             | Tag::Clipboard(_)
-                            | Tag::Ps1PromptCwdWidget(_)
+                            | Tag::PromptCwdWidget(_)
                             | Tag::TabCompletionScrollBar { .. }
                             | Tag::FlycompSandboxInfo
                             | Tag::FlycompInfo
@@ -1091,7 +1091,7 @@ impl MouseEventAction {
                 MouseActionOutput::update_now()
             }
             MouseEventAction::PromptDirSelect => {
-                if let Some(Tag::Ps1PromptCwdWidget(idx)) = clicked_tag {
+                if let Some(Tag::PromptCwdWidget(idx)) = clicked_tag {
                     app.content_mode = ContentMode::PromptDirSelect(idx);
                 }
                 MouseActionOutput::dont_update()
@@ -1146,7 +1146,6 @@ impl MouseEventAction {
                             context_before_word,
                             buffer_snapshot,
                             request,
-                            sandbox,
                             ..
                         } = mode
                         {
@@ -1157,7 +1156,6 @@ impl MouseEventAction {
                                 context_before_word,
                                 buffer_snapshot,
                                 request,
-                                sandbox.is_some(),
                             );
                         }
                         MouseActionOutput::update_now()
@@ -1221,7 +1219,7 @@ impl MouseEventAction {
                             ..
                         } = mode
                         {
-                            app.settings.flycomp_blacklist.insert(command_word);
+                            app.settings.flycomp.add_to_blacklist(command_word);
                             if let Some(fallback) = fallback {
                                 app.show_preserved_tab_completion(fallback);
                             }
@@ -1266,7 +1264,7 @@ impl MouseEventAction {
                         });
                         text_opt.map(crate::app::RightClickCopyTarget::HistoryEntry)
                     }
-                    Some(Tag::Ps1PromptCwdWidget(idx)) => app
+                    Some(Tag::PromptCwdWidget(idx)) => app
                         .prompt_manager
                         .cwd_path_for_index(idx)
                         .map(crate::app::RightClickCopyTarget::Cwd),
