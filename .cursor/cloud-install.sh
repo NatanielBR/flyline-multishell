@@ -40,6 +40,12 @@ if [ ! -f /etc/docker/daemon.json ] || ! grep -q 'fuse-overlayfs' /etc/docker/da
   printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' | sudo tee /etc/docker/daemon.json >/dev/null
 fi
 
+# Membership applies to new sessions; cloud-start.sh still chmods the socket
+# because this snapshot's agent process may have started before usermod.
+if getent group docker >/dev/null 2>&1; then
+  sudo usermod -aG docker "$(id -un)" || true
+fi
+
 # Ubuntu /etc/zsh/zshrc runs `compinit` without -i, which hangs the headless
 # completion-daemon PTY. Must live in /etc/zsh/zshenv: tests that set ZDOTDIR
 # skip ~/.zshenv, so a home-only fix still loads the global compinit.
