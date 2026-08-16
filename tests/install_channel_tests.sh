@@ -61,45 +61,50 @@ mkdir -p "$stage"
 # Full installer: leftover 1.1.0 in dest, archive contains 1.2.0.
 os="$(detect_os)"
 arch="$(detect_arch)"
-if [ "$os" = "linux" ]; then
-    libc="$(detect_libc)"
-    case "$arch" in
-        armv7) target="armv7-unknown-linux-gnueabihf" ;;
-        *) target="${arch}-unknown-linux-${libc}" ;;
-    esac
-    if is_supported_target "$target"; then
-        scratch="${tmp}/leftover-install"
-        dest="${scratch}/lib"
-        assets="${scratch}/assets"
-        pkg="${scratch}/pkg"
-        home="${scratch}/home"
-        mkdir -p "$dest" "$assets" "$pkg/scripts" "$home"
-        : >"${dest}/libflyline.so.1.1.0"
-        : >"${pkg}/libflyline.so.1.2.0"
-        : >"${pkg}/flyline-standalone"
-        chmod +x "${pkg}/flyline-standalone"
-        : >"${pkg}/scripts/flyline.zsh"
-        : >"${pkg}/scripts/flyline.fish"
-        : >"${pkg}/LICENSE-MIT"
-        : >"${pkg}/LICENSE-GPLv3"
-        : >"${pkg}/UPSTREAM_BASE.toml"
-        tag="dev-20260816-abc1234"
-        archive="libflyline-${tag}-${target}.tar.gz"
-        if is_system_bash_pre_4_4 && is_supported_pre_bash_4_4_target "$target"; then
-            archive="libflyline-${tag}-${target}_pre_bash_4_4.tar.gz"
-        fi
-        tar czf "${assets}/${archive}" -C "$pkg" .
-        (cd "$assets" && sha256sum "$archive" > "${archive}.sha256")
-        out="${scratch}/install.out"
-        if ! HOME="$home" FLYLINE_INSTALL_DIR="$dest" FLYLINE_ASSET_BASE="$assets" \
-            FLYLINE_INSTALL_VERSION="$tag" sh ./install.sh >"$out" 2>&1; then
-            cat "$out" >&2
-            fail "leftover install failed"
-        fi
-        link="$(readlink "${dest}/libflyline.so")"
-        [ "$link" = "libflyline.so.1.2.0" ] || fail "leftover install linked ${link}"
-        [ -f "${dest}/libflyline.so.1.1.0" ] || fail "leftover 1.1.0 should remain"
-    fi
+[ "$os" = "linux" ] || fail "leftover-lib installer coverage requires linux, got ${os}"
+libc="$(detect_libc)"
+case "$arch" in
+    armv7) target="armv7-unknown-linux-gnueabihf" ;;
+    *) target="${arch}-unknown-linux-${libc}" ;;
+esac
+is_supported_target "$target" || fail "unsupported leftover-lib test target ${target}"
+
+scratch="${tmp}/leftover-install"
+dest="${scratch}/lib"
+assets="${scratch}/assets"
+pkg="${scratch}/pkg"
+home="${scratch}/home"
+mkdir -p "$dest" "$assets" "$pkg/scripts" "$home"
+: >"${dest}/libflyline.so.1.1.0"
+ln -s libflyline.so.1.1.0 "${dest}/libflyline.so"
+: >"${pkg}/libflyline.so.1.2.0"
+: >"${pkg}/flyline-standalone"
+chmod +x "${pkg}/flyline-standalone"
+: >"${pkg}/scripts/flyline.zsh"
+: >"${pkg}/scripts/flyline.fish"
+: >"${pkg}/LICENSE-MIT"
+: >"${pkg}/LICENSE-GPLv3"
+: >"${pkg}/UPSTREAM_BASE.toml"
+tag="dev-20260816-abc1234"
+archive="libflyline-${tag}-${target}.tar.gz"
+if is_system_bash_pre_4_4 && is_supported_pre_bash_4_4_target "$target"; then
+    archive="libflyline-${tag}-${target}_pre_bash_4_4.tar.gz"
 fi
+tar czf "${assets}/${archive}" -C "$pkg" .
+(cd "$assets" && sha256sum "$archive" > "${archive}.sha256")
+out="${scratch}/install.out"
+if ! HOME="$home" FLYLINE_INSTALL_DIR="$dest" FLYLINE_ASSET_BASE="$assets" \
+    FLYLINE_INSTALL_VERSION="$tag" sh ./install.sh >"$out" 2>&1; then
+    cat "$out" >&2
+    fail "leftover install failed"
+fi
+grep -q "Creating symlink libflyline.so -> libflyline.so.1.2.0" "$out" \
+    || fail "installer did not report symlink to 1.2.0"
+! grep -q "Creating symlink libflyline.so -> libflyline.so.1.1.0" "$out" \
+    || fail "installer reported symlink to leftover 1.1.0"
+link="$(readlink "${dest}/libflyline.so")"
+[ "$link" = "libflyline.so.1.2.0" ] || fail "leftover install linked ${link}"
+[ -f "${dest}/libflyline.so.1.1.0" ] || fail "leftover 1.1.0 should remain"
+[ -f "${dest}/libflyline.so.1.2.0" ] || fail "new 1.2.0 should be installed"
 
 echo "install_channel_tests: ok"
