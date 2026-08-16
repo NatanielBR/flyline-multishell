@@ -49,17 +49,14 @@ cargo fmt
 
 ## Cursor Cloud specific instructions
 
-### Docker in this environment
-Cloud Agents run Docker inside another container. For bake/integration tests (`docker buildx bake …`), configure the daemon with **fuse-overlayfs** and **iptables-legacy** before starting it — plain `overlayfs`/`vfs` often fails with `invalid argument` on BuildKit mounts. See [Running Docker](https://cursor.com/docs/cloud-agent/setup#running-docker).
+### Docker / zsh / fish test host
+`.cursor/cloud-install.sh` (snapshot) and `.cursor/cloud-start.sh` (per boot) prepare this image for the upstream-sync test gate: zsh, fish, nested Docker with **fuse-overlayfs** + **iptables-legacy**, `skip_global_compinit=1` in `/etc/zsh/zshenv` (not only `~/.zshenv` — `ZDOTDIR` tests skip home zshenv), and `python3-argcomplete`'s `#compdef -P *` completer moved off `$fpath`.
+
+Do not treat remaining zsh lib-test failures as an import regression until the same test fails on a master worktree **with that host setup**. If you are on an old snapshot that never ran those scripts, install packages and start `dockerd` as in [Running Docker](https://cursor.com/docs/cloud-agent/setup#running-docker):
 
 ```bash
-sudo apt-get install -y fuse-overlayfs iptables docker.io docker-buildx
-sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
-sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
-printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' | sudo tee /etc/docker/daemon.json
-sudo dockerd --host=unix:///var/run/docker.sock &
-# or: sudo service docker start  (once the daemon.json is in place)
-sudo chmod 666 /var/run/docker.sock   # if the agent user is not in group docker yet
+bash .cursor/cloud-install.sh   # or the apt/daemon.json steps if the script is missing
+bash .cursor/cloud-start.sh
 ```
 
 ### Fish / zsh local smoke
