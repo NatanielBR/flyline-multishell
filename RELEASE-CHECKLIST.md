@@ -28,6 +28,7 @@ must never trigger this repository's release workflow.
    docker buildx bake bash-integration-tests zsh-integration-test fish-integration-test
    actionlint
    shellcheck install.sh
+   sh tests/install_channel_tests.sh
    zsh -n scripts/flyline.zsh
    fish -n scripts/flyline.fish
    ```
@@ -97,3 +98,18 @@ gh release delete multishell-vX.Y.Z --yes
 Delete stale workflow artifacts before the new-version dry run if their
 contents no longer match the corrected commit. Never use `--cleanup-tag` or
 retarget an existing release tag.
+
+## Cut a development snapshot
+
+Do not bump `Cargo.toml`. Create one unique annotated tag on the commit to
+snapshot (UTC date + 7-character SHA):
+
+```bash
+tag="dev-$(date -u +%Y%m%d)-$(git rev-parse --short=7 HEAD)"
+git tag -a "$tag" -m "flyline-multishell $tag"
+git push origin "refs/tags/$tag"
+```
+
+Never reuse, retarget, or force-push a `dev-*` tag. Never `git push --tags`.
+Do not promote a `dev-*` GitHub release to latest. The next snapshot is a new
+tag. `sh tests/install_channel_tests.sh` covers installer channel selection.

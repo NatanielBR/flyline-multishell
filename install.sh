@@ -1,6 +1,7 @@
 #!/bin/sh
 # Flyline installer
 # Usage: curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | sh
+#        curl -sSfL …/releases/latest/download/install.sh | FLYLINE_CHANNEL=dev sh
 #        sh install.sh --uninstall
 
 set -eu
@@ -105,6 +106,87 @@ get_latest_version() {
     version="$(printf '%s' "$tag_url" | sed 's|.*/||' | cut -d' ' -f1 | tr -d '\r\n')"
     [ -n "$version" ] || err "Could not determine latest version from GitHub Release redirect."
     echo "$version"
+}
+
+# Pick the newest published GitHub release tag for a channel from a releases
+# JSON array (stdin). python3 is only needed for FLYLINE_CHANNEL=dev|prerelease.
+pick_release_tag_from_json() {
+    channel="$1"
+    python3 -c '
+import json, sys
+channel = sys.argv[1]
+releases = json.load(sys.stdin)
+if not isinstance(releases, list):
+    raise SystemExit(2)
+for release in releases:
+    if release.get("draft"):
+        continue
+    tag = release.get("tag_name") or ""
+    prerelease = bool(release.get("prerelease"))
+    if channel == "dev":
+        if tag.startswith("dev-") and prerelease:
+            print(tag)
+            raise SystemExit(0)
+    elif channel == "prerelease":
+        if tag.startswith("multishell-v") and prerelease:
+            print(tag)
+            raise SystemExit(0)
+    else:
+        raise SystemExit(2)
+raise SystemExit(1)
+' "$channel"
+}
+
+get_channel_version() {
+    channel="$1"
+    case "$channel" in
+        stable)
+            get_latest_version
+            ;;
+        dev|prerelease)
+            command -v python3 >/dev/null 2>&1 \
+                || err "FLYLINE_CHANNEL=${channel} needs python3, or set FLYLINE_INSTALL_VERSION to a tag."
+            api_url="https://api.github.com/repos/${REPO}/releases?per_page=100"
+            if command -v curl >/dev/null 2>&1; then
+                json="$(curl -sSfL -H 'Accept: application/vnd.github+json' "$api_url")"
+            elif command -v wget >/dev/null 2>&1; then
+                json="$(wget -qO- --header='Accept: application/vnd.github+json' "$api_url")"
+            else
+                err "Neither curl nor wget is available. Please install one and retry."
+            fi
+            if ! tag="$(printf '%s' "$json" | pick_release_tag_from_json "$channel")"; then
+                err "No published ${channel} release found for ${REPO}."
+            fi
+            [ -n "$tag" ] || err "No published ${channel} release found for ${REPO}."
+            echo "$tag"
+            ;;
+        *)
+            err "Unknown FLYLINE_CHANNEL '${channel}'. Use stable, prerelease, or dev."
+            ;;
+    esac
+}
+
+# Cargo-versioned lib name inside the tarball (libflyline.so.1.2.0). Product
+# tags encode that in the git tag; dev tags do not.
+lib_version_suffix() {
+    version="$1"
+    install_dir="$2"
+    lib_name="$3"
+    case "$version" in
+        multishell-v*) echo "${version#multishell-v}" ;;
+        v*)            echo "${version#v}" ;;
+        dev-*)
+            suffix=""
+            for path in "${install_dir}/${lib_name}".[0-9]*; do
+                [ -f "$path" ] || continue
+                suffix="${path##*"${lib_name}".}"
+                break
+            done
+            [ -n "$suffix" ] || return 1
+            echo "$suffix"
+            ;;
+        *) echo "$version" ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -642,9 +724,10 @@ main() {
     elif [ -n "$FLYLINE_ASSET_BASE" ]; then
         err "FLYLINE_ASSET_BASE is set but no version was specified. Set FLYLINE_INSTALL_VERSION to the version of the assets in ${FLYLINE_ASSET_BASE}."
     else
-        say "Fetching latest release information..."
-        VERSION="$(get_latest_version)"
-        say "Latest version: ${VERSION}"
+        channel="${FLYLINE_CHANNEL:-stable}"
+        say "Fetching ${channel} release information..."
+        VERSION="$(get_channel_version "$channel")"
+        say "Using ${channel} version: ${VERSION}"
     fi
 
     ARCHIVE_STEM="libflyline-${VERSION}-${TARGET}"
@@ -683,11 +766,7 @@ main() {
 
     tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$INSTALL_DIR"
 
-    case "$VERSION" in
-        multishell-v*) VERSION_NO_V="${VERSION#multishell-v}" ;;
-        v*)            VERSION_NO_V="${VERSION#v}" ;;
-        *)             VERSION_NO_V="$VERSION" ;;
-    esac
+    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$INSTALL_DIR" "$LIB_NAME" || true)"
     LIB_VERSIONED="${LIB_NAME}.${VERSION_NO_V}"
 
     if [ -f "${INSTALL_DIR}/${LIB_VERSIONED}" ]; then
@@ -785,19 +864,21 @@ main() {
     fi
 }
 
-case "${1:-}" in
-    --uninstall|-u)
-        if [ -n "${FLYLINE_INSTALL_DIR:-}" ]; then
-            INSTALL_DIR="$(expand_path "$FLYLINE_INSTALL_DIR")"
-        elif [ -n "${FLYLINE_LOAD_DIR:-}" ]; then
-            INSTALL_DIR="$(expand_path "$FLYLINE_LOAD_DIR")"
-        fi
-        uninstall_main
-        ;;
-    --local|-l)
-        local_main "${2:-}"
-        ;;
-    *)
-        main "$@"
-        ;;
-esac
+if [ "${FLYLINE_INSTALL_SH_LIB:-}" != 1 ]; then
+    case "${1:-}" in
+        --uninstall|-u)
+            if [ -n "${FLYLINE_INSTALL_DIR:-}" ]; then
+                INSTALL_DIR="$(expand_path "$FLYLINE_INSTALL_DIR")"
+            elif [ -n "${FLYLINE_LOAD_DIR:-}" ]; then
+                INSTALL_DIR="$(expand_path "$FLYLINE_LOAD_DIR")"
+            fi
+            uninstall_main
+            ;;
+        --local|-l)
+            local_main "${2:-}"
+            ;;
+        *)
+            main "$@"
+            ;;
+    esac
+fi

@@ -1,0 +1,32 @@
+[
+  {
+    "tag_name": "dev-20260816-aaaaaaa",
+    "draft": true,
+    "prerelease": true
+  },
+  {
+    "tag_name": "multishell-v1.3.0",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "dev-20260815-bbbbbbb",
+    "draft": false,
+    "prerelease": true
+  },
+  {
+    "tag_name": "multishell-v1.2.0",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "dev-20260801-ccccccc",
+    "draft": false,
+    "prerelease": false
+  },
+  {
+    "tag_name": "multishell-v1.1.0",
+    "draft": false,
+    "prerelease": true
+  }
+]

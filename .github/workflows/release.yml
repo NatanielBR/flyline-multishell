@@ -3,11 +3,13 @@ name: Release
 # Release pipeline for the `flyline-multishell` fork.
 #
 # Triggers:
-#   * push of a `multishell-v*.*.*` tag  -> real release (dry_run=false)
+#   * push of a `multishell-v*.*.*` tag  -> product release (dry_run=false)
+#   * push of a `dev-*` tag              -> snapshot prerelease (dry_run=false)
 #   * workflow_dispatch                  -> non-publishing dry run only.
 #
 # This workflow NEVER creates or pushes git tags. Real releases reuse the tag
 # that already exists on the remote (created by a human per RELEASE-CHECKLIST.md).
+# `dev-*` tags are unique snapshots (dev-YYYYMMDD-<shortsha>); never retarget them.
 #
 # Draft-first, test-before-publish flow:
 #   setup -> build (12-target matrix) + sbom -> test-install
@@ -22,10 +24,11 @@ on:
   push:
     tags:
       - 'multishell-v*.*.*'
+      - 'dev-*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag/ref to release (e.g. multishell-v1.0.0). Leave empty for a dry-run rehearsal derived from Cargo.toml.'
+        description: 'Existing tag/ref to rehearse (e.g. multishell-v1.0.0 or dev-YYYYMMDD-<sha>). Leave empty for a dry-run derived from Cargo.toml.'
         required: false
         type: string
       dry_run:
@@ -59,6 +62,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
       dry_run: ${{ steps.meta.outputs.dry_run }}
       upstream_repo: ${{ steps.meta.outputs.upstream_repo }}
       upstream_release: ${{ steps.meta.outputs.upstream_release }}
@@ -84,7 +88,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Cargo package version is the source of truth for the release version.
+          # Cargo package version names the loadable library inside archives.
+          # Product tags must match it; dev tags keep Cargo.toml unchanged.
           cargo_version="$(cargo metadata --format-version 1 --no-deps \
             | jq -r '.packages[] | select(.name == "flyline") | .version')"
           if [ -z "$cargo_version" ] || [ "$cargo_version" = "null" ]; then
@@ -98,7 +103,7 @@ jobs:
             dry_run="false"
           else
             if [ "${INPUT_DRY_RUN:-true}" != "true" ]; then
-              echo "::error::Manual publishing is disabled. Push an immutable multishell-vX.Y.Z tag to create a release."
+              echo "::error::Manual publishing is disabled. Push an immutable multishell-vX.Y.Z or dev-YYYYMMDD-<sha> tag to create a release."
               exit 1
             fi
             if [ -n "${INPUT_TAG:-}" ]; then
@@ -110,29 +115,37 @@ jobs:
             dry_run="true"
           fi
 
-          # Validate the tag prefix.
+          # Product tags must match Cargo.toml. Dev snapshots keep Cargo.toml
+          # unchanged; archives still name the loadable lib after cargo_version.
+          channel=""
+          version=""
           case "$tag" in
-            multishell-v*) : ;;
+            multishell-v*)
+              channel="product"
+              tag_version="${tag#multishell-v}"
+              if ! [[ "$tag_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                echo "::error::Version '$tag_version' (from tag '$tag') is not strict X.Y.Z SemVer"
+                exit 1
+              fi
+              if [ "$tag_version" != "$cargo_version" ]; then
+                echo "::error::Tag version '$tag_version' does not match Cargo package version '$cargo_version'"
+                exit 1
+              fi
+              version="$tag_version"
+              ;;
+            dev-*)
+              channel="dev"
+              if ! [[ "$tag" =~ ^dev-[0-9]{8}-[0-9a-f]{7,12}$ ]]; then
+                echo "::error::Dev tag '$tag' must match dev-YYYYMMDD-<7-12 hex sha> (e.g. dev-20260816-abc1234)"
+                exit 1
+              fi
+              version="$cargo_version"
+              ;;
             *)
-              echo "::error::Release tag '$tag' must start with 'multishell-v'"
+              echo "::error::Release tag '$tag' must be 'multishell-vX.Y.Z' or 'dev-YYYYMMDD-<sha>'"
               exit 1
               ;;
           esac
-
-          tag_version="${tag#multishell-v}"
-
-          # Validate a strict, release-grade X.Y.Z shape (no extra components,
-          # suffixes, or leading zeroes).
-          if ! [[ "$tag_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Version '$tag_version' (from tag '$tag') is not strict X.Y.Z SemVer"
-            exit 1
-          fi
-
-          # Tag version must match the Cargo package version exactly.
-          if [ "$tag_version" != "$cargo_version" ]; then
-            echo "::error::Tag version '$tag_version' does not match Cargo package version '$cargo_version'"
-            exit 1
-          fi
 
           # Read upstream base metadata (records the upstream point this fork tracks).
           ub="UPSTREAM_BASE.toml"
@@ -156,7 +169,8 @@ jobs:
 
           {
             echo "tag=$tag"
-            echo "version=$tag_version"
+            echo "version=$version"
+            echo "channel=$channel"
             echo "dry_run=$dry_run"
             echo "upstream_repo=$upstream_repo"
             echo "upstream_release=$upstream_release"
@@ -170,7 +184,8 @@ jobs:
             echo "| --- | --- |"
             echo "| repository | \`${GITHUB_REPOSITORY}\` |"
             echo "| tag | \`$tag\` |"
-            echo "| version | \`$tag_version\` |"
+            echo "| version | \`$version\` |"
+            echo "| channel | \`$channel\` |"
             echo "| dry run | \`$dry_run\` |"
             echo "| upstream repo | \`$upstream_repo\` |"
             echo "| upstream release | \`$upstream_release\` |"
@@ -275,7 +290,7 @@ jobs:
           prefix-key: release-${{ matrix.target }}${{ matrix.suffix }}-1.96.0
           cache-targets: true
           cache-on-failure: true
-          save-if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/multishell-v') }}
+          save-if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/multishell-v') || startsWith(github.ref, 'refs/tags/dev-') }}
 
       - name: Install cross
         if: matrix.build_tool == 'cross'
@@ -615,16 +630,56 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.setup.outputs.tag }}
           VERSION: ${{ needs.setup.outputs.version }}
+          CHANNEL: ${{ needs.setup.outputs.channel }}
           REPO: ${{ github.repository }}
+          SNAPSHOT_SHA: ${{ github.sha }}
           UPSTREAM_REPO: ${{ needs.setup.outputs.upstream_repo }}
           UPSTREAM_RELEASE: ${{ needs.setup.outputs.upstream_release }}
           UPSTREAM_COMMIT: ${{ needs.setup.outputs.upstream_commit }}
         run: |
           set -euo pipefail
 
-          # The embedded changelog is the source of truth for user-facing
-          # changes. GitHub's generated notes omit direct-to-master commits, so
-          # require and include the section for this exact fork version.
+          if [ "$CHANNEL" = "dev" ]; then
+            {
+              echo "## flyline-multishell $TAG"
+              echo ""
+              echo "Development snapshot, not a product release. \`Cargo.toml\` stays"
+              echo "at \`${VERSION}\`; the loadable library inside the archive is still"
+              echo "\`libflyline.so.${VERSION}\` (or \`.dylib\`)."
+              echo ""
+              echo "- Git tag: \`${TAG}\`"
+              echo "- Commit: \`${SNAPSHOT_SHA}\`"
+              echo ""
+              echo "**Upstream base**"
+              echo ""
+              echo "- Repository: \`${UPSTREAM_REPO}\`"
+              echo "- Release: \`${UPSTREAM_RELEASE}\`"
+              echo "- Commit: \`${UPSTREAM_COMMIT}\`"
+              echo ""
+              echo "**Install**"
+              echo ""
+              echo "Env vars must be set on \`sh\`, not only on \`curl\`:"
+              echo ""
+              echo '```bash'
+              echo "curl -sSfL https://github.com/${REPO}/releases/latest/download/install.sh | FLYLINE_CHANNEL=dev sh"
+              echo '```'
+              echo ""
+              echo "If \`releases/latest\` still serves an installer without channel support,"
+              echo "fetch this tag's script:"
+              echo ""
+              echo '```bash'
+              echo "curl -sSfL https://github.com/${REPO}/releases/download/${TAG}/install.sh | FLYLINE_CHANNEL=dev sh"
+              echo '```'
+              echo ""
+              echo "Do not promote this GitHub release to latest. Cut a new \`dev-*\` tag for"
+              echo "the next snapshot; never retarget or force-push this tag."
+            } > release-body.md
+            exit 0
+          fi
+
+          # Product releases: the embedded changelog is the source of truth.
+          # GitHub's generated notes omit direct-to-master commits, so require
+          # and include the section for this exact fork version.
           changelog="$(awk -v "heading=## v${VERSION}" '
             $0 == heading { capture = 1; next }
             capture && /^## / { exit }
@@ -711,14 +766,21 @@ jobs:
       - name: Publish summary + rerun/cleanup guidance
         env:
           TAG: ${{ needs.setup.outputs.tag }}
+          CHANNEL: ${{ needs.setup.outputs.channel }}
           REPO: ${{ github.repository }}
         run: |
           {
             echo "### Published prerelease \`$TAG\`"
             echo ""
             echo "- Repository: \`$REPO\`"
-            echo "- Marked as **prerelease**. Promote to stable manually once verified:"
-            echo "  \`gh release edit $TAG --repo $REPO --prerelease=false --latest\`"
+            echo "- Channel: \`$CHANNEL\`"
+            if [ "$CHANNEL" = "dev" ]; then
+              echo "- Marked as **prerelease** and must never be latest. Do not run \`gh release edit --prerelease=false --latest\`."
+              echo "- Next snapshot: a new unique \`dev-YYYYMMDD-<sha>\` tag. Never retarget or force-push this tag."
+            else
+              echo "- Marked as **prerelease**. Promote to stable manually once verified:"
+              echo "  \`gh release edit $TAG --repo $REPO --prerelease=false --latest\`"
+            fi
             echo ""
             echo "#### Rerun / cleanup guidance"
             echo ""
@@ -726,5 +788,9 @@ jobs:
             echo "- To discard a botched release WITHOUT deleting the git tag:"
             echo "  \`gh release delete $TAG --repo $REPO --yes\`"
             echo "  (Do NOT pass \`--cleanup-tag\`; the tag is managed by humans per RELEASE-CHECKLIST.md.)"
-            echo "- Retry the same tag only for transient failures. Source fixes require a new version and immutable tag."
+            if [ "$CHANNEL" = "dev" ]; then
+              echo "- Source fixes require a new unique \`dev-*\` tag. Do not reuse this one."
+            else
+              echo "- Retry the same tag only for transient failures. Source fixes require a new version and immutable tag."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
