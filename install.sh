@@ -166,11 +166,11 @@ get_channel_version() {
     esac
 }
 
-# Cargo-versioned lib name inside the tarball (libflyline.so.1.2.0). Product
-# tags encode that in the git tag; dev tags do not. For `dev-*`, glob the
-# unpacked archive directory (not the install dest): a leftover
-# `libflyline.so.1.1.0` would otherwise sort before `1.2.0`. Exactly one
-# versioned match is required.
+# Cargo-versioned lib name inside the tarball (libflyline.so.<cargo version>).
+# Product tags encode that in the git tag; dev tags do not. For `dev-*`, glob
+# the unpacked archive directory (not the install dest): a leftover
+# versioned library that sorts first under POSIX glob would otherwise win.
+# Exactly one versioned match is required.
 lib_version_suffix() {
     version="$1"
     install_dir="$2"
