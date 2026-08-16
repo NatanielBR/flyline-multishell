@@ -223,6 +223,8 @@ pub enum KeyEventAction {
     UnsetLeaderKey,
     #[strum(message = "Insert a literal string of characters", disabled)]
     InsertString(String),
+    #[strum(message = "Run a Bash command", disabled)]
+    RunBashCommand(String),
 }
 
 /// Serialized as its camelCase action name (via strum), never as a struct.
@@ -245,6 +247,7 @@ impl KeyEventAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             KeyEventAction::InsertString(_) => "insertString",
+            KeyEventAction::RunBashCommand(_) => "runBashCommand",
             _ => <&'static str>::from(self),
         }
     }
@@ -254,6 +257,7 @@ impl KeyEventAction {
     pub fn description(&self) -> &'static str {
         match self {
             KeyEventAction::InsertString(_) => "Insert a literal string of characters",
+            KeyEventAction::RunBashCommand(_) => "Run a Bash command",
             _ => self.get_message().unwrap_or(""),
         }
     }
@@ -261,6 +265,7 @@ impl KeyEventAction {
     pub fn display_name(&self) -> String {
         match self {
             KeyEventAction::InsertString(s) => format!("insertString('{}')", s.escape_debug()),
+            KeyEventAction::RunBashCommand(s) => format!("runBashCommand('{}')", s.escape_debug()),
             _ => self.as_str().to_string(),
         }
     }
@@ -344,7 +349,6 @@ impl KeyEventAction {
                     buffer_snapshot,
                     request,
                     selection,
-                    sandbox,
                     fallback,
                     ..
                 } = mode
@@ -358,7 +362,6 @@ impl KeyEventAction {
                                 context_before_word,
                                 buffer_snapshot,
                                 request,
-                                sandbox.is_some(),
                             );
                         }
                         FlycompPromptSelection::No => {}
@@ -368,7 +371,7 @@ impl KeyEventAction {
                             }
                         }
                         FlycompPromptSelection::DontAsk => {
-                            app.settings.flycomp_blacklist.insert(command_word);
+                            app.settings.flycomp.add_to_blacklist(command_word);
                             if let Some(fallback) = fallback {
                                 app.show_preserved_tab_completion(fallback);
                             }
@@ -972,6 +975,9 @@ impl KeyEventAction {
                 app.buffer.delete_selection();
                 app.buffer.insert_str(s);
             }
+            KeyEventAction::RunBashCommand(cmd) => {
+                app.run_bash_command(cmd);
+            }
         }
     }
 }
@@ -1195,6 +1201,30 @@ fn parse_single_keycode(s: &str) -> Result<KeyCode> {
         return Ok(KeyCode::Char(lower_case));
     }
     let lower = s.to_lowercase();
+    // Char specification: "Char(j)", "char('j')", "Char("j")"
+    if lower.starts_with("char(") && s.ends_with(')') {
+        let inner = s[5..s.len() - 1].trim();
+        let unquoted = if (inner.starts_with('\'') && inner.ends_with('\''))
+            || (inner.starts_with('"') && inner.ends_with('"'))
+        {
+            if inner.len() >= 2 {
+                &inner[1..inner.len() - 1]
+            } else {
+                inner
+            }
+        } else {
+            inner
+        };
+        if unquoted.len() == 1 {
+            let c = unquoted.chars().next().unwrap();
+            return Ok(KeyCode::Char(c.to_ascii_lowercase()));
+        } else {
+            return Err(anyhow::anyhow!(
+                "Invalid Char(...) specification: '{}'. Expected a single character.",
+                s
+            ));
+        }
+    }
     // F-key: "f1" … "f255"
     if let Some(rest) = lower.strip_prefix('f') {
         if let Ok(n) = rest.parse::<u8>() {
@@ -1561,6 +1591,27 @@ fn parse_actions_str(action_str: &str) -> Result<Vec<KeyEventAction>> {
                 };
                 let unescaped = unescape_string(inner_trimmed);
                 Ok(KeyEventAction::InsertString(unescaped))
+            } else if let Some(stripped) = s.strip_prefix("runBashCommand(") {
+                if !stripped.ends_with(')') {
+                    return Err(anyhow::anyhow!(
+                        "Invalid runBashCommand syntax: '{}'. Expected 'runBashCommand(value)'",
+                        s
+                    ));
+                }
+                let inner = &stripped[..stripped.len() - 1];
+                let inner_trimmed = if (inner.starts_with('"') && inner.ends_with('"'))
+                    || (inner.starts_with('\'') && inner.ends_with('\''))
+                {
+                    if inner.len() >= 2 {
+                        &inner[1..inner.len() - 1]
+                    } else {
+                        inner
+                    }
+                } else {
+                    inner
+                };
+                let unescaped = unescape_string(inner_trimmed);
+                Ok(KeyEventAction::RunBashCommand(unescaped))
             } else {
                 KeyEventAction::try_from(s).map_err(|_| anyhow::anyhow!("Unknown action: '{}'", s))
             }
@@ -1644,7 +1695,7 @@ impl Binding {
     /// Parse a user-provided binding from the CLI form
     /// `<KEY> <CONTEXT_EXPR>=<ACTION>`.
     pub fn try_new_from_strs(key_event: &str, context_and_action: &str) -> Result<Self> {
-        let (context_str, action_str) = context_and_action.rsplit_once('=').ok_or_else(|| {
+        let (context_str, action_str) = context_and_action.split_once('=').ok_or_else(|| {
             anyhow::anyhow!(
                 "Invalid context and action format: '{}'. Expected 'context=action'",
                 context_and_action
@@ -2120,6 +2171,15 @@ pub fn possible_context_action_completions(current: &std::ffi::OsStr) -> Vec<Com
                 .help(Some(clap::builder::StyledStr::from(
                     "Insert a literal string of characters",
                 ))),
+            );
+        }
+        if "runbashcommand".contains(&action_lower) {
+            candidates.push(
+                CompletionCandidate::new(format!(
+                    "{}PREFIX_DELIM{}{}NO_SUFFIX",
+                    prefix, action_prefix, "runBashCommand(command)"
+                ))
+                .help(Some(clap::builder::StyledStr::from("Run a Bash command"))),
             );
         }
         return candidates;
@@ -4051,6 +4111,23 @@ mod tests {
         assert_eq!(parse_single_modifier("hyper").unwrap(), KeyModifiers::HYPER);
     }
 
+    #[test]
+    fn test_parse_char_keycode() {
+        assert_eq!(parse_single_keycode("Char(j)").unwrap(), KeyCode::Char('j'));
+        assert_eq!(
+            parse_single_keycode("char('j')").unwrap(),
+            KeyCode::Char('j')
+        );
+        assert_eq!(
+            parse_single_keycode("Char(\"j\")").unwrap(),
+            KeyCode::Char('j')
+        );
+        assert_eq!(
+            KeyEventMatch::try_from("Ctrl+Char(j)").unwrap(),
+            KeyEventMatch::Exact(key_with_mods(KeyCode::Char('j'), KeyModifiers::CONTROL))
+        );
+    }
+
     // --- key_event_match_overlaps ---
 
     #[test]
@@ -4298,6 +4375,43 @@ mod tests {
         );
 
         assert!(Binding::try_new_from_strs("Ctrl+g", "always=insertString(hello").is_err());
+    }
+
+    #[test]
+    fn test_binding_try_new_from_strs_run_bash_command() {
+        let b =
+            Binding::try_new_from_strs("Ctrl+g", "always=runBashCommand('echo hello')").unwrap();
+        assert_eq!(
+            b.actions,
+            vec![KeyEventAction::RunBashCommand("echo hello".to_string())]
+        );
+
+        let action = KeyEventAction::RunBashCommand("echo hello".to_string());
+        assert_eq!(action.as_str(), "runBashCommand");
+        assert_eq!(action.description(), "Run a Bash command");
+        assert_eq!(action.display_name(), "runBashCommand('echo hello')");
+
+        let b2 =
+            Binding::try_new_from_strs("Ctrl+g", "always=runBashCommand(\"echo \\\"hello\\\"\")")
+                .unwrap();
+        assert_eq!(
+            b2.actions,
+            vec![KeyEventAction::RunBashCommand("echo \"hello\"".to_string())]
+        );
+
+        let b3 = Binding::try_new_from_strs(
+            "Up",
+            "editingBufferMode+!cursorOnFirstLine=runBashCommand(\"__atuin_history --shell-up-key-binding --keymap-mode=emacs\")",
+        )
+        .unwrap();
+        assert_eq!(
+            b3.actions,
+            vec![KeyEventAction::RunBashCommand(
+                "__atuin_history --shell-up-key-binding --keymap-mode=emacs".to_string()
+            )]
+        );
+
+        assert!(Binding::try_new_from_strs("Ctrl+g", "always=runBashCommand(echo hello").is_err());
     }
 
     #[test]

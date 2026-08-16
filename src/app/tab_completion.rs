@@ -1308,7 +1308,7 @@ impl App<'_> {
 
         if let Some(request) = builder.flycomp_request {
             let dump_path = if request == FlycompRequest::InstallCompletionScript {
-                let output_dir = self.settings.flycomp_output.as_deref();
+                let output_dir = self.settings.flycomp.output_dir();
                 Some(
                     backend()
                         .resolve_completion_script_path(&command_word, output_dir)
@@ -1318,7 +1318,6 @@ impl App<'_> {
             } else {
                 None
             };
-            let sandbox = flycomp::is_sandboxing_available();
             let command_identity = match request {
                 FlycompRequest::InstallCompletionScript => resolve_flycomp_command(&command_word),
                 FlycompRequest::SuggestOptions => resolve_flycomp_option_identity(&command_word),
@@ -1340,7 +1339,6 @@ impl App<'_> {
             } else {
                 None
             };
-
             self.content_mode = ContentMode::TabCompletionAskForFlycomp {
                 command_word,
                 command_identity,
@@ -1349,7 +1347,6 @@ impl App<'_> {
                 buffer_snapshot,
                 request,
                 selection: FlycompPromptSelection::Yes,
-                sandbox,
                 dump_path,
                 fallback,
             };
@@ -1442,8 +1439,8 @@ impl App<'_> {
             .unwrap_or("")
             .to_string();
         let flycomp_gate = compute_flycomp_gate(
-            self.settings.use_flycomp,
-            self.settings.flycomp_blacklist.contains(&command_word),
+            self.settings.flycomp.enabled(),
+            self.settings.flycomp.is_blacklisted(&command_word),
             auto_started,
             &wuc_substring.s,
             is_option_candidate(&completion_context_owned),
@@ -1454,7 +1451,7 @@ impl App<'_> {
             command_word,
             wuc_substring.s,
             auto_started,
-            self.settings.use_flycomp,
+            self.settings.flycomp.enabled(),
             self.settings.flycomp_synthesize_options,
             flycomp_gate,
             completion_context_owned.comp_types(),

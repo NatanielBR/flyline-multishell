@@ -129,6 +129,9 @@ pub static mut array_needs_making: c_int = 0;
 stub_fn_ret!(push_stream(reset_lineno: c_int));
 stub_fn_ret!(pop_stream());
 stub_fn_ret!(with_input_from_stdin());
+// v1.4.0 evaluate_shell_string saves/restores bash parser state; standalone has none.
+stub_fn_ret!(save_parser_state(_ps: *mut c_void) -> *mut c_void = std::ptr::null_mut());
+stub_fn_ret!(restore_parser_state(_ps: *mut c_void));
 stub_fn_ret!(get_alias_value(_name: *const c_char) -> *mut c_char = std::ptr::null_mut());
 stub_fn_ret!(find_function_def(_name: *const c_char) -> *mut FunctionDef = std::ptr::null_mut());
 stub_fn_ret!(describe_command(_command: *const c_char, _dflags: c_int) -> c_int = 1);

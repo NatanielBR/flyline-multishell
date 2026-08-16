@@ -32,6 +32,15 @@ pub(crate) const CHANGELOG: &str = r#"# Changelog
 
 # Upstream (HalFrgrd/flyline)
 
+## v1.4.0
+- **`Char(c)` Key Binding Syntax**: Added support for `Char(c)` / `char('c')` / `Char("c")` single-character key specifications in `flyline key bind` (e.g. `flyline key bind Char(j)`).
+- **Inline Viewport Smooth Height**: Viewport height pre-allocates to available space down to the bottom of the screen without scrolling up, eliminating viewport resize flicker when opening popups. (Skipped the extra pre-viewport `cursor::position()` newline insertion: a second `ESC[6n` probe hangs zsh/fish zpty hosts that never answer DSR.)
+- **Third-Party Integration**: Enhanced support and terminal state synchronization for third-party tools (Atuin, FZF). Bash-only: `runBashCommand` talks to readline env vars (`READLINE_LINE` / `POINT` / `MARK`).
+- **Customizable PS2**: Added support for customizable PS2 multi-line prompt rendering.
+- **Packaging & Build Systems**: Added Nix flake packaging, Arch Linux build fixes, and `SOURCE_DATE_EPOCH` support for reproducible build timestamps.
+- **Settings & Config**: Exposed Flycomp settings in Flyline and added options to disable easter eggs.
+- **Bug Fixes & Stability**: Resolved PATH scan lock contention, zero-width terminal suggestion popup panics, and unterminated quote auto-newline insertion.
+
 ## v1.3.0
 - **Leader Keys**: Added support for chorded keybinding sequences (e.g., `Ctrl+x` followed by `Ctrl+f`) via the new `setLeaderKey` and `unsetLeaderKey` actions and the `leaderKeyActive` context variable.
 - **Leader Key Visual Feedback**: Introduced the `leader-mode` prompt widget to display visual indicators (like ` X `) in the prompt when the leader key state is active.

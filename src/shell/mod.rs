@@ -82,6 +82,12 @@ pub trait ShellBackend: Sync {
     /// Pre-warm completion caches in a background-friendly way.
     fn warm_completion_caches(&self);
 
+    /// Pre-warm the PATH executable cache. This is filesystem-only and must not
+    /// hold the host-shell lock (Bash `BASH_LOCK`).
+    fn warm_path_cache(&self, path_env: Option<String>) {
+        crate::bash_funcs::warm_path_cache(path_env);
+    }
+
     /// Non-zero when the host shell received a terminating signal.
     fn read_terminating_signal(&self) -> libc::c_int;
 
@@ -335,7 +341,7 @@ impl ShellBackend for BashBackend {
     }
 
     fn warm_completion_caches(&self) {
-        crate::bash_funcs::warm_completion_caches();
+        crate::bash_funcs::warm_bash_caches();
     }
 
     fn read_terminating_signal(&self) -> libc::c_int {
@@ -660,7 +666,7 @@ mod tests {
         backend().reset_caches();
         crate::bash_funcs::reset_caches();
         backend().warm_completion_caches();
-        crate::bash_funcs::warm_completion_caches();
+        crate::bash_funcs::warm_bash_caches();
     }
 
     #[test]

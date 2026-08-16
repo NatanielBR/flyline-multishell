@@ -103,6 +103,10 @@ struct FlylineArgs {
     /// disable it on terminals that misbehave when the request is sent.
     #[arg(long = "enable-extended-key-codes", default_missing_value = "true", num_args = 0..=1)]
     enable_extended_key_codes: Option<bool>,
+    /// Whether easter eggs (such as animated command words like `python`) are enabled.
+    /// Enabled by default; pass `--enable-easter-eggs false` to disable.
+    #[arg(long = "enable-easter-eggs", default_missing_value = "true", num_args = 0..=1)]
+    enable_easter_eggs: Option<bool>,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -564,7 +568,12 @@ enum Commands {
         #[arg(long = "auto-suggest", default_missing_value = "true", num_args = 0..=1)]
         auto_suggest: Option<bool>,
         /// Enable or disable flycomp for synthesizing shell completions when no useful compspec is found.
-        #[arg(long = "use-flycomp", default_missing_value = "true", num_args = 0..=1)]
+        #[arg(
+            long = "use-flycomp",
+            default_missing_value = "true",
+            num_args = 0..=1,
+            hide = true
+        )]
         use_flycomp: Option<bool>,
         /// Offer flycomp option synthesis when a native completer is registered
         /// but returns nothing for an option-shaped word (e.g. `grep --`).
@@ -578,10 +587,10 @@ enum Commands {
         num_suggestion_rows: Option<u16>,
         /// Directory where flycomp output should be saved.
         /// You should source the completions from this directory in your bashrc so flyline can use them next time.
-        #[arg(long = "flycomp-output", value_name = "DIR")]
+        #[arg(long = "flycomp-output", value_name = "DIR", hide = true)]
         flycomp_output: Option<String>,
         /// Blacklist of command words for which flycomp prompt should be bypassed.
-        #[arg(long = "flycomp-blacklist", value_name = "COMMANDS", num_args = 1..)]
+        #[arg(long = "flycomp-blacklist", value_name = "COMMANDS", num_args = 1.., hide = true)]
         flycomp_blacklist: Option<Vec<String>>,
     },
     /// Configure mouse options and debugging.
@@ -626,6 +635,9 @@ enum SuggestionsSubcommands {
         #[arg(value_name = "MODE")]
         mode: settings::FuzzyMode,
     },
+    /// Configure flycomp settings.
+    #[command(name = "flycomp", verbatim_doc_comment)]
+    Flycomp(flycomp::FlycompSettings),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1008,6 +1020,11 @@ pub fn run_flyline_command(cfg: &mut settings::Settings, args: &[&str]) -> c_int
             if let Some(enabled) = parsed.enable_extended_key_codes {
                 log::info!("Extended keyboard codes enabled: {}", enabled);
                 cfg.enable_extended_key_codes = enabled;
+            }
+
+            if let Some(enabled) = parsed.enable_easter_eggs {
+                log::info!("Easter eggs enabled: {}", enabled);
+                cfg.enable_easter_eggs = enabled;
             }
 
             match parsed.command {
@@ -1408,11 +1425,15 @@ pub fn run_flyline_command(cfg: &mut settings::Settings, args: &[&str]) -> c_int
                                 log::info!("Fuzzy mode set to {:?}", mode);
                                 cfg.fuzzy_mode = mode;
                             }
+                            SuggestionsSubcommands::Flycomp(opts) => {
+                                log::info!("Flycomp settings updated: {:?}", opts);
+                                cfg.flycomp.update(opts);
+                            }
                         }
                     }
                     if let Some(list) = flycomp_blacklist {
                         log::info!("Flycomp blacklist set to {:?}", list);
-                        cfg.flycomp_blacklist = list.into_iter().collect();
+                        cfg.flycomp.blacklist = Some(list);
                     }
                     if let Some(enabled) = auto_suggest {
                         log::info!("Auto tab-completion suggestions set to {}", enabled);
@@ -1420,7 +1441,7 @@ pub fn run_flyline_command(cfg: &mut settings::Settings, args: &[&str]) -> c_int
                     }
                     if let Some(enabled) = use_flycomp {
                         log::info!("Use flycomp set to {}", enabled);
-                        cfg.use_flycomp = enabled;
+                        cfg.flycomp.enabled = Some(enabled);
                     }
                     if let Some(enabled) = flycomp_synthesize_options {
                         log::info!("Flycomp synthesize options set to {}", enabled);
@@ -1441,7 +1462,7 @@ pub fn run_flyline_command(cfg: &mut settings::Settings, args: &[&str]) -> c_int
                     }
                     if let Some(path) = flycomp_output {
                         log::info!("Flycomp output directory set to '{}'", path);
-                        cfg.flycomp_output = Some(path);
+                        cfg.flycomp.output_dir = Some(path);
                     }
                 }
                 Some(Commands::Time { format }) => {
@@ -2045,5 +2066,79 @@ mod tests {
         assert_eq!(code, OK);
         let after = serde_json::to_string(&cfg).unwrap();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn test_flyline_suggestions_flycomp_cli_parse() {
+        let raw_cmd = "flyline suggestions ";
+        let wuc = "";
+        let cursor_byte = raw_cmd.len();
+        let comps = complete_flyline_args(raw_cmd, wuc, cursor_byte).unwrap();
+        let values: Vec<String> = comps
+            .into_iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect();
+        assert!(values.contains(&"flycomp".to_string()));
+
+        let args = FlylineArgs::try_parse_from([
+            "flyline",
+            "suggestions",
+            "flycomp",
+            "--enabled",
+            "false",
+            "--strategy",
+            "run-help",
+            "--sandbox",
+            "false",
+            "--timeout-ms",
+            "8000",
+            "--recurse-limit",
+            "4",
+            "--output-dir",
+            "/tmp/completions",
+            "--blacklist",
+            "git",
+            "cargo",
+        ])
+        .unwrap();
+
+        let mut settings = settings::Settings::default();
+        if let Some(Commands::Suggestions {
+            subcommand: Some(SuggestionsSubcommands::Flycomp(opts)),
+            ..
+        }) = args.command
+        {
+            settings.flycomp.update(opts);
+        } else {
+            panic!("Expected SuggestionsSubcommands::Flycomp");
+        }
+
+        assert_eq!(settings.flycomp.enabled(), false);
+        assert_eq!(
+            settings.flycomp.strategy(),
+            flycomp::SynthesisStrategy::RunHelp
+        );
+        assert_eq!(settings.flycomp.sandbox(), false);
+        assert_eq!(settings.flycomp.timeout_ms(), 8000);
+        assert_eq!(settings.flycomp.recurse_limit(), 4);
+        assert_eq!(settings.flycomp.output_dir(), Some("/tmp/completions"));
+        assert!(settings.flycomp.is_blacklisted("git"));
+        assert!(settings.flycomp.is_blacklisted("cargo"));
+        assert!(!settings.flycomp.is_blacklisted("vim"));
+    }
+
+    #[test]
+    fn test_flyline_enable_easter_eggs_parse() {
+        let args =
+            FlylineArgs::try_parse_from(["flyline", "--enable-easter-eggs", "false"]).unwrap();
+        assert_eq!(args.enable_easter_eggs, Some(false));
+
+        let args_true =
+            FlylineArgs::try_parse_from(["flyline", "--enable-easter-eggs", "true"]).unwrap();
+        assert_eq!(args_true.enable_easter_eggs, Some(true));
+
+        let args_default =
+            FlylineArgs::try_parse_from(["flyline", "--enable-easter-eggs"]).unwrap();
+        assert_eq!(args_default.enable_easter_eggs, Some(true));
     }
 }

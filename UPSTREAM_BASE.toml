@@ -4,5 +4,5 @@
 
 [upstream]
 repository = "HalFrgrd/flyline"
-release = "v1.3.0"
-commit = "339e8bf1699064a314783c05e65593664f611a04"
+release = "v1.4.0"
+commit = "34e0833e97137433659caf2f4d80e2d9a584d790"

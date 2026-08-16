@@ -7,6 +7,7 @@ pub const BUILTIN_ENABLED: c_int = 0x01;
 
 pub const SEVAL_NOHIST: c_int = 0x004;
 pub const SEVAL_NOOPTIMIZE: c_int = 0x400;
+pub const SEVAL_NOTIFY: c_int = 0x800;
 
 /* A structure which represents a word. */
 // typedef struct word_desc {
@@ -162,6 +163,8 @@ unsafe extern "C" {
     // from shell.h
     pub static interactive: c_int;
     pub static interactive_shell: c_int;
+    pub fn save_parser_state(ps: *mut libc::c_void) -> *mut libc::c_void;
+    pub fn restore_parser_state(ps: *mut libc::c_void);
 
     // from shell.h
     pub static no_line_editing: c_int;

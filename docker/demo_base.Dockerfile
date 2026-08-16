@@ -30,6 +30,7 @@ ENV PATH="/home/john/bin:${PATH}"
 # Install a pinned EVP release (the terminal recorder used to render the demos).
 # Pinning an exact version and verifying the published SHA-256 avoids the
 # supply-chain risk of piping the raw/master install script straight into sh.
+# ponytail: skipped upstream EVP v0.19.0 until a matching SHA-256 pin exists.
 ENV EVP_VERSION=0.17.0
 ENV EVP_TARGET=x86_64-unknown-linux-musl
 ENV EVP_SHA256=295a0b250b6cd04fe294cedee20dbf392df012d962f3cc37d3085b4cd1daeaaa
