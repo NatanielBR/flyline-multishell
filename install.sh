@@ -167,7 +167,10 @@ get_channel_version() {
 }
 
 # Cargo-versioned lib name inside the tarball (libflyline.so.1.2.0). Product
-# tags encode that in the git tag; dev tags do not.
+# tags encode that in the git tag; dev tags do not. For `dev-*`, glob the
+# unpacked archive directory (not the install dest): a leftover
+# `libflyline.so.1.1.0` would otherwise sort before `1.2.0`. Exactly one
+# versioned match is required.
 lib_version_suffix() {
     version="$1"
     install_dir="$2"
@@ -176,14 +179,16 @@ lib_version_suffix() {
         multishell-v*) echo "${version#multishell-v}" ;;
         v*)            echo "${version#v}" ;;
         dev-*)
-            suffix=""
+            found=""
             for path in "${install_dir}/${lib_name}".[0-9]*; do
                 [ -f "$path" ] || continue
-                suffix="${path##*"${lib_name}".}"
-                break
+                if [ -n "$found" ]; then
+                    return 1
+                fi
+                found="${path##*"${lib_name}".}"
             done
-            [ -n "$suffix" ] || return 1
-            echo "$suffix"
+            [ -n "$found" ] || return 1
+            echo "$found"
             ;;
         *) echo "$version" ;;
     esac
@@ -764,9 +769,14 @@ main() {
 
     mkdir -p "$INSTALL_DIR"
 
-    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$INSTALL_DIR"
+    # Unpack to a staging dir first so `dev-*` lib glob cannot see leftover
+    # versioned libraries already in INSTALL_DIR.
+    STAGE="${TMP_DIR}/pkg"
+    mkdir -p "$STAGE"
+    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$STAGE"
 
-    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$INSTALL_DIR" "$LIB_NAME" || true)"
+    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$STAGE" "$LIB_NAME" || true)"
+    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$INSTALL_DIR"
     LIB_VERSIONED="${LIB_NAME}.${VERSION_NO_V}"
 
     if [ -f "${INSTALL_DIR}/${LIB_VERSIONED}" ]; then
