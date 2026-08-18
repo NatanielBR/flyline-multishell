@@ -66,52 +66,109 @@ mkdir -p "$stage"
 [ "$(lib_version_suffix "$dev_tag" "$stage" libflyline.so)" = "$packed" ] \
     || fail "dev glob of archive staging dir"
 
-# Full installer: dest already has leftover; archive contains packed.
+# Full installer runs against this host's own target so the coverage works on
+# Linux, macOS and FreeBSD rather than only where the release matrix runs.
 os="$(detect_os)"
 arch="$(detect_arch)"
-[ "$os" = "linux" ] || fail "leftover-lib installer coverage requires linux, got ${os}"
-libc="$(detect_libc)"
-case "$arch" in
-    armv7) target="armv7-unknown-linux-gnueabihf" ;;
-    *) target="${arch}-unknown-linux-${libc}" ;;
+case "$os" in
+    darwin)
+        target="${arch}-apple-darwin"
+        lib="libflyline.dylib"
+        ;;
+    freebsd)
+        target="x86_64-unknown-freebsd"
+        lib="libflyline.so"
+        ;;
+    *)
+        libc="$(detect_libc)"
+        case "$arch" in
+            armv7) target="armv7-unknown-linux-gnueabihf" ;;
+            *) target="${arch}-unknown-linux-${libc}" ;;
+        esac
+        lib="libflyline.so"
+        ;;
 esac
-is_supported_target "$target" || fail "unsupported leftover-lib test target ${target}"
+is_supported_target "$target" || fail "no release archive is built for ${target}"
 
-scratch="${tmp}/leftover-install"
-dest="${scratch}/lib"
-assets="${scratch}/assets"
-pkg="${scratch}/pkg"
-home="${scratch}/home"
-mkdir -p "$dest" "$assets" "$pkg/scripts" "$home"
-: >"${dest}/libflyline.so.${leftover}"
-ln -s "libflyline.so.${leftover}" "${dest}/libflyline.so"
-: >"${pkg}/libflyline.so.${packed}"
-: >"${pkg}/flyline-standalone"
-chmod +x "${pkg}/flyline-standalone"
-: >"${pkg}/scripts/flyline.zsh"
-: >"${pkg}/scripts/flyline.fish"
-: >"${pkg}/LICENSE-MIT"
-: >"${pkg}/LICENSE-GPLv3"
-: >"${pkg}/UPSTREAM_BASE.toml"
-archive="libflyline-${dev_tag}-${target}.tar.gz"
-if is_system_bash_pre_4_4 && is_supported_pre_bash_4_4_target "$target"; then
-    archive="libflyline-${dev_tag}-${target}_pre_bash_4_4.tar.gz"
-fi
-tar czf "${assets}/${archive}" -C "$pkg" .
-(cd "$assets" && sha256sum "$archive" > "${archive}.sha256")
-out="${scratch}/install.out"
-if ! HOME="$home" FLYLINE_INSTALL_DIR="$dest" FLYLINE_ASSET_BASE="$assets" \
-    FLYLINE_INSTALL_VERSION="$dev_tag" sh ./install.sh >"$out" 2>&1; then
+# Stage a release archive by hand, then install it over a previous install that
+# left an older versioned library behind.
+stage_archive() {
+    scratch="$1"
+    dest="${scratch}/lib"
+    assets="${scratch}/assets"
+    pkg="${scratch}/pkg"
+    home="${scratch}/home"
+    mkdir -p "$dest" "$assets" "$pkg/scripts" "$home"
+    : >"${pkg}/flyline-standalone"
+    chmod +x "${pkg}/flyline-standalone"
+    : >"${pkg}/scripts/flyline.zsh"
+    : >"${pkg}/scripts/flyline.fish"
+    : >"${pkg}/LICENSE-MIT"
+    : >"${pkg}/LICENSE-GPLv3"
+    : >"${pkg}/UPSTREAM_BASE.toml"
+    archive="libflyline-${dev_tag}-${target}.tar.gz"
+    if is_system_bash_pre_4_4 && is_supported_pre_bash_4_4_target "$target"; then
+        archive="libflyline-${dev_tag}-${target}_pre_bash_4_4.tar.gz"
+    fi
+}
+
+seal_archive() {
+    tar czf "${assets}/${archive}" -C "$pkg" .
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$assets" && sha256sum "$archive" > "${archive}.sha256")
+    else
+        (cd "$assets" && shasum -a 256 "$archive" > "${archive}.sha256")
+    fi
+}
+
+run_installer() {
+    out="$1"
+    status=0
+    HOME="$home" FLYLINE_INSTALL_DIR="$dest" FLYLINE_ASSET_BASE="$assets" \
+        FLYLINE_INSTALL_VERSION="$dev_tag" sh ./install.sh >"$out" 2>&1 || status=$?
+    echo "$status"
+}
+
+stage_archive "${tmp}/leftover-install"
+: >"${dest}/${lib}.${leftover}"
+ln -s "${lib}.${leftover}" "${dest}/${lib}"
+: >"${pkg}/${lib}.${packed}"
+seal_archive
+out="${tmp}/leftover.out"
+if [ "$(run_installer "$out")" != 0 ]; then
     cat "$out" >&2
     fail "leftover install failed"
 fi
-grep -q "Creating symlink libflyline.so -> libflyline.so.${packed}" "$out" \
+grep -q "Creating symlink ${lib} -> ${lib}.${packed}" "$out" \
     || fail "installer did not report symlink to packed ${packed}"
-! grep -q "Creating symlink libflyline.so -> libflyline.so.${leftover}" "$out" \
+! grep -q "Creating symlink ${lib} -> ${lib}.${leftover}" "$out" \
     || fail "installer reported symlink to leftover ${leftover}"
-link="$(readlink "${dest}/libflyline.so")"
-[ "$link" = "libflyline.so.${packed}" ] || fail "leftover install linked ${link}"
-[ -f "${dest}/libflyline.so.${leftover}" ] || fail "leftover ${leftover} should remain"
-[ -f "${dest}/libflyline.so.${packed}" ] || fail "packed ${packed} should be installed"
+link="$(readlink "${dest}/${lib}")"
+[ "$link" = "${lib}.${packed}" ] || fail "leftover install linked ${link}"
+[ -f "${dest}/${lib}.${leftover}" ] || fail "leftover ${leftover} should remain"
+[ -f "${dest}/${lib}.${packed}" ] || fail "packed ${packed} should be installed"
+
+# An unresolvable packaged version must abort rather than leave the previous
+# install's symlink (and therefore the older library) in place.
+for shape in none ambiguous tag_named; do
+    stage_archive "${tmp}/reject-${shape}"
+    : >"${dest}/${lib}.${leftover}"
+    ln -s "${lib}.${leftover}" "${dest}/${lib}"
+    case "$shape" in
+        none) : ;;
+        ambiguous)
+            : >"${pkg}/${lib}.${packed}"
+            : >"${pkg}/${lib}.${leftover}"
+            ;;
+        tag_named) : >"${pkg}/${lib}.${dev_tag}" ;;
+    esac
+    seal_archive
+    out="${tmp}/reject-${shape}.out"
+    [ "$(run_installer "$out")" != 0 ] \
+        || { cat "$out" >&2; fail "${shape} archive should fail the install"; }
+    link="$(readlink "${dest}/${lib}")"
+    [ "$link" = "${lib}.${leftover}" ] \
+        || fail "${shape}: symlink should be untouched, got ${link}"
+done
 
 echo "install_channel_tests: ok"

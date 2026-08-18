@@ -166,21 +166,22 @@ get_channel_version() {
     esac
 }
 
-# Cargo-versioned lib name inside the tarball (libflyline.so.<cargo version>).
-# Product tags encode that in the git tag; dev tags do not. For `dev-*`, glob
-# the unpacked archive directory (not the install dest): a leftover
-# versioned library that sorts first under POSIX glob would otherwise win.
-# Exactly one versioned match is required.
+# Version suffix of the packaged library (libflyline.so.<cargo version>).
+# Product tags encode that in the git tag; dev tags do not, so for `dev-*` the
+# suffix is read back from the unpacked archive. Callers must pass the staging
+# directory, never the install destination: a leftover versioned library there
+# can sort ahead of the new one under POSIX glob and win. Exactly one versioned
+# match is required.
 lib_version_suffix() {
     version="$1"
-    install_dir="$2"
+    search_dir="$2"
     lib_name="$3"
     case "$version" in
         multishell-v*) echo "${version#multishell-v}" ;;
         v*)            echo "${version#v}" ;;
         dev-*)
             found=""
-            for path in "${install_dir}/${lib_name}".[0-9]*; do
+            for path in "${search_dir}/${lib_name}".[0-9]*; do
                 [ -f "$path" ] || continue
                 if [ -n "$found" ]; then
                     return 1
@@ -769,26 +770,32 @@ main() {
 
     mkdir -p "$INSTALL_DIR"
 
-    # Unpack to a staging dir first so `dev-*` lib glob cannot see leftover
-    # versioned libraries already in INSTALL_DIR.
+    # Unpack into a staging dir so the library glob below cannot see leftover
+    # versioned libraries already in INSTALL_DIR, then copy the staged tree over.
     STAGE="${TMP_DIR}/pkg"
     mkdir -p "$STAGE"
     tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$STAGE"
 
-    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$STAGE" "$LIB_NAME" || true)"
-    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$INSTALL_DIR"
+    # Resolving this must be fatal: an empty suffix would look for
+    # "${LIB_NAME}." and fall through to leaving a previous install's symlink
+    # (and therefore an older library) in place.
+    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$STAGE" "$LIB_NAME")" \
+        || err "Could not determine the packaged ${LIB_NAME} version from ${ARCHIVE}. The archive must contain exactly one ${LIB_NAME}.<version> file."
     LIB_VERSIONED="${LIB_NAME}.${VERSION_NO_V}"
+
+    cp -R "$STAGE/." "$INSTALL_DIR/"
 
     if [ -f "${INSTALL_DIR}/${LIB_VERSIONED}" ]; then
         say "Creating symlink ${LIB_NAME} -> ${LIB_VERSIONED}..."
         rm -f "${INSTALL_DIR}/${LIB_NAME}"
         (cd "$INSTALL_DIR" && ln -s "$LIB_VERSIONED" "$LIB_NAME")
+    elif [ -f "${STAGE}/${LIB_NAME}" ]; then
+        # The archive itself shipped an unversioned library, which the copy above
+        # already put in place. Checking the staging dir (not INSTALL_DIR) keeps
+        # this distinct from a previous install's leftover symlink.
+        warn "Archive contains ${LIB_NAME} rather than ${LIB_VERSIONED}; using it as installed."
     else
-        if [ -f "${INSTALL_DIR}/${LIB_NAME}" ]; then
-            warn "Expected to find versioned library ${LIB_VERSIONED}, but found ${LIB_NAME} instead."
-        else
-            err "Failed to find the installed library file in ${INSTALL_DIR}."
-        fi
+        err "Failed to install ${LIB_VERSIONED} into ${INSTALL_DIR}."
     fi
 
     LIB_PATH="${INSTALL_DIR}/${LIB_NAME}"
