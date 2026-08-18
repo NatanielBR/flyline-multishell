@@ -214,4 +214,19 @@ out="${tmp}/unversioned-lib.out"
     || { cat "$out" >&2; fail "archive with an unversioned library should install"; }
 grep -q "Archive contains ${lib}" "$out" || fail "installer did not report the unversioned library"
 
+# 5. A library Bash cannot load must not be written into ~/.bashrc, since that
+#    line runs on every new interactive shell.
+if [ -n "$bash_bin" ] && [ "${bash_major:-0}" -ge 5 ]; then
+    stage_case unloadable
+    write_stub_lib "${pkg}/${lib}.${packed}"
+    seal_archive
+    out="${tmp}/unloadable.out"
+    [ "$(run_install "$out")" = 0 ] \
+        || { cat "$out" >&2; fail "install should still succeed for the other shells"; }
+    ! grep -q 'enable -f' "${home}/.bashrc" 2>/dev/null \
+        || fail "unloadable library was wired into ~/.bashrc"
+    grep -q 'could not load' "$out" \
+        || fail "installer did not report the skipped Bash integration"
+fi
+
 echo "install_resilience_tests: ok"

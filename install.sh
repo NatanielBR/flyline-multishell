@@ -767,6 +767,35 @@ main() {
     install_zsh_integration
     install_fish_integration
 
+    # A bad `enable -f` line in ~/.bashrc runs on every new interactive Bash, so
+    # look for evidence the builtin cannot load before writing it. The probe is a
+    # separate Bash process with --norc, so it reads no user config and cannot
+    # disturb the running shell. It needs -i because flyline deliberately
+    # declines to load in non-interactive shells, which makes the probe's exit
+    # status on its own a false negative for a perfectly good library.
+    #
+    # Only act on positive evidence of an unloadable library: a dlopen or symbol
+    # error, or the probe dying from a signal as it does on a truncated object.
+    # Anything else counts as a probe that could not draw a conclusion, and the
+    # integration is written as before.
+    if $install_bash_integration && command -v bash >/dev/null 2>&1; then
+        probe_status=0
+        probe_out="$(bash --norc -i -c 'enable -f "$1" flyline' \
+            flyline-load-probe "$LIB_PATH" 2>&1)" || probe_status=$?
+        if [ "$probe_status" -ne 0 ] && {
+            [ "$probe_status" -ge 128 ] \
+                || printf '%s' "$probe_out" \
+                    | grep -q 'cannot open shared object\|cannot find flyline_struct'
+        }; then
+            install_bash_integration=false
+            probe_detail="$(printf '%s' "$probe_out" | grep 'enable:' | head -1)"
+            warn "Bash could not load ${LIB_PATH}${probe_detail:+ (${probe_detail})}."
+            warn "Leaving ${BASHRC} unchanged so your terminals keep starting normally."
+            warn "Once the cause is resolved, enable it with:"
+            warn "    enable -f ${LIB_PATH} flyline"
+        fi
+    fi
+
     # Update or add 'enable -f ... flyline' in ~/.bashrc when this platform's
     # Bash can load the packaged builtin.
     if $install_bash_integration; then
