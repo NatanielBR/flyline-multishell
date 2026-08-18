@@ -19,7 +19,7 @@ paru -S flyline
 
 ### What the installer does:
 1. **Platform Detection**: Automatically detects your Operating System (Linux, macOS, FreeBSD), Architecture (x86_64, aarch64, armv7, i686, riscv64gc, powerpc64le), and libc variant (glibc, musl).
-2. **Download**: Fetches the matching release tarball (`.tar.gz`) and checksum file directly from the GitHub releases page (latest version or `FLYLINE_INSTALL_VERSION`).
+2. **Download**: Fetches the matching release tarball (`.tar.gz`) and checksum file from GitHub (`releases/latest`, `FLYLINE_CHANNEL`, or a pinned `FLYLINE_INSTALL_VERSION`).
 3. **Extraction**: Unpacks the compiled library into `~/.local/lib/` (or your custom `FLYLINE_INSTALL_DIR`).
 4. **Symlink Management**: Creates a versioned file (e.g., `libflyline.so.1.2.1`) and updates the `libflyline.so` symlink to point to it.
 5. **Shell Configuration**: Appends or updates the dynamic builtin load command in your `~/.bashrc`:
@@ -72,7 +72,9 @@ You can customize the installation behavior by setting environment variables bef
 |----------------------|-------------|---------|
 | `FLYLINE_INSTALL_DIR` | The destination directory where the shared library is installed. | `~/.local/lib` (or `FLYLINE_LOAD_DIR` if set) |
 | `FLYLINE_LOAD_DIR` | Exported by an active `flyline` session. Used by the installer as the default upgrade directory. | *(none)* |
-| `FLYLINE_INSTALL_VERSION` | Force the installer to download a specific version tag instead of the latest release. | *(latest release)* |
+| `FLYLINE_INSTALL_VERSION` | Pin a specific git tag. Wins over `FLYLINE_CHANNEL`. | *(unset)* |
+| `FLYLINE_CHANNEL` | `stable` (GitHub `releases/latest`), `prerelease` (newest published `multishell-v*` prerelease), or `dev` (newest published `dev-*` snapshot). Ignored when `FLYLINE_INSTALL_VERSION` is set. Must be set on `sh`, e.g. `curl … \| FLYLINE_CHANNEL=dev sh`. | `stable` |
+| `GITHUB_TOKEN` / `GH_TOKEN` | Sent as a bearer token when `FLYLINE_CHANNEL` is `prerelease` or `dev`, which resolve the tag through the GitHub releases API. Unauthenticated API requests are capped at 60/hour per IP, so set this on CI runners and shared networks. Unused by `stable` and by a pinned `FLYLINE_INSTALL_VERSION`. | *(none)* |
 
 ### Example Custom Installation
 To install version `multishell-v1.0.0` in a custom directory (`~/apps/lib`):
@@ -81,4 +83,10 @@ To install version `multishell-v1.0.0` in a custom directory (`~/apps/lib`):
 export FLYLINE_INSTALL_DIR="~/apps/lib"
 export FLYLINE_INSTALL_VERSION="multishell-v1.0.0"
 curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | sh
+```
+
+To follow a channel instead of pinning, set `FLYLINE_CHANNEL` on `sh` (not only on `curl`):
+
+```bash
+curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | FLYLINE_CHANNEL=dev sh
 ```

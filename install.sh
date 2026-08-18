@@ -1,6 +1,7 @@
 #!/bin/sh
 # Flyline installer
 # Usage: curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | sh
+#        curl -sSfL …/releases/latest/download/install.sh | FLYLINE_CHANNEL=dev sh
 #        sh install.sh --uninstall
 
 set -eu
@@ -152,6 +153,147 @@ get_latest_version() {
     version="$(printf '%s' "$tag_url" | sed 's|.*/||' | cut -d' ' -f1 | tr -d '\r\n')"
     [ -n "$version" ] || err "Could not determine latest version from GitHub Release redirect."
     echo "$version"
+}
+
+# Pick the newest published GitHub release tag for a channel from one page of
+# releases JSON (stdin). python3 is only needed for FLYLINE_CHANNEL=dev|prerelease.
+# Exit codes: 0 printed a tag, 1 no match on this page, 2 the payload is not a
+# release list (API error object, rate-limit body, invalid JSON), 3 the page is
+# empty so the release list is exhausted.
+pick_release_tag_from_json() {
+    channel="$1"
+    python3 -c '
+import json, sys
+channel = sys.argv[1]
+try:
+    releases = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(2)
+if not isinstance(releases, list):
+    raise SystemExit(2)
+if not releases:
+    raise SystemExit(3)
+if channel == "dev":
+    prefix = "dev-"
+elif channel == "prerelease":
+    prefix = "multishell-v"
+else:
+    raise SystemExit(2)
+for release in releases:
+    if not isinstance(release, dict) or release.get("draft"):
+        continue
+    tag = release.get("tag_name") or ""
+    if tag.startswith(prefix) and bool(release.get("prerelease")):
+        print(tag)
+        raise SystemExit(0)
+raise SystemExit(1)
+' "$channel"
+}
+
+# Fetch one page of the releases API. Sends GITHUB_TOKEN/GH_TOKEN when set:
+# unauthenticated requests are capped at 60/hour per IP, which a CI runner or a
+# shared NAT can exhaust.
+fetch_releases_page() {
+    page="$1"
+    url="https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}"
+    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if command -v curl >/dev/null 2>&1; then
+        if [ -n "$token" ]; then
+            curl -sSfL --retry 5 --retry-delay 2 --retry-connrefused \
+                -H 'Accept: application/vnd.github+json' \
+                -H "Authorization: Bearer ${token}" "$url"
+        else
+            curl -sSfL --retry 5 --retry-delay 2 --retry-connrefused \
+                -H 'Accept: application/vnd.github+json' "$url"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if [ -n "$token" ]; then
+            wget -qO- --header='Accept: application/vnd.github+json' \
+                --header="Authorization: Bearer ${token}" "$url"
+        else
+            wget -qO- --header='Accept: application/vnd.github+json' "$url"
+        fi
+    else
+        err "Neither curl nor wget is available. Please install one and retry."
+    fi
+}
+
+# Resolve the release tag to install for a channel:
+#   stable      GitHub's releases/latest redirect (skips prereleases)
+#   prerelease  newest published multishell-v* prerelease
+#   dev         newest published dev-* snapshot
+get_channel_version() {
+    channel="$1"
+    case "$channel" in
+        stable)
+            get_latest_version
+            return
+            ;;
+        dev | prerelease) : ;;
+        *)
+            err "Unknown FLYLINE_CHANNEL '${channel}'. Use stable, prerelease, or dev."
+            ;;
+    esac
+
+    command -v python3 >/dev/null 2>&1 \
+        || err "FLYLINE_CHANNEL=${channel} needs python3, or set FLYLINE_INSTALL_VERSION to a tag."
+
+    # Dev snapshots and product releases share one release list, so the newest
+    # release for a channel can sit past the first page once snapshots pile up.
+    page=1
+    page_limit=10
+    while :; do
+        json="$(fetch_releases_page "$page")" \
+            || err "Could not read the GitHub releases API for ${REPO}. Unauthenticated requests are capped at 60/hour per IP: set GITHUB_TOKEN, or pin FLYLINE_INSTALL_VERSION=<tag>."
+        status=0
+        tag="$(printf '%s' "$json" | pick_release_tag_from_json "$channel")" || status=$?
+        case "$status" in
+            0)
+                echo "$tag"
+                return 0
+                ;;
+            2)
+                err "Unexpected response from the GitHub releases API for ${REPO} (rate limited, or not a release list). Set GITHUB_TOKEN, or pin FLYLINE_INSTALL_VERSION=<tag>."
+                ;;
+            3)
+                break
+                ;;
+        esac
+        if [ "$page" -ge "$page_limit" ]; then
+            err "No published ${channel} release for ${REPO} in the newest $((page_limit * 100)) releases. Pin FLYLINE_INSTALL_VERSION=<tag> instead."
+        fi
+        page=$((page + 1))
+    done
+    err "No published ${channel} release found for ${REPO}."
+}
+
+# Version suffix of the packaged library (libflyline.so.<cargo version>).
+# Product tags encode that in the git tag; dev tags do not, so for `dev-*` the
+# suffix is read back from the unpacked archive. Callers must pass the staging
+# directory, never the install destination: a leftover versioned library there
+# can sort ahead of the new one under POSIX glob and win. Exactly one versioned
+# match is required.
+lib_version_suffix() {
+    version="$1"
+    search_dir="$2"
+    lib_name="$3"
+    case "$version" in
+        multishell-v*) echo "${version#multishell-v}" ;;
+        v*)            echo "${version#v}" ;;
+        dev-*)
+            found=""
+            for path in "${search_dir}/${lib_name}".[0-9]*; do
+                [ -f "$path" ] || continue
+                if [ -n "$found" ]; then
+                    return 1
+                fi
+                found="${path##*"${lib_name}".}"
+            done
+            [ -n "$found" ] || return 1
+            echo "$found"
+            ;;
+        *) echo "$version" ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -689,9 +831,10 @@ main() {
     elif [ -n "$FLYLINE_ASSET_BASE" ]; then
         err "FLYLINE_ASSET_BASE is set but no version was specified. Set FLYLINE_INSTALL_VERSION to the version of the assets in ${FLYLINE_ASSET_BASE}."
     else
-        say "Fetching latest release information..."
-        VERSION="$(get_latest_version)"
-        say "Latest version: ${VERSION}"
+        channel="${FLYLINE_CHANNEL:-stable}"
+        say "Fetching ${channel} release information..."
+        VERSION="$(get_channel_version "$channel")"
+        say "Using ${channel} version: ${VERSION}"
     fi
 
     ARCHIVE_STEM="libflyline-${VERSION}-${TARGET}"
@@ -733,11 +876,11 @@ main() {
     mkdir -p "$STAGE"
     tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$STAGE"
 
-    case "$VERSION" in
-        multishell-v*) VERSION_NO_V="${VERSION#multishell-v}" ;;
-        v*)            VERSION_NO_V="${VERSION#v}" ;;
-        *)             VERSION_NO_V="$VERSION" ;;
-    esac
+    # Resolving this must be fatal: an empty suffix would look for
+    # "${LIB_NAME}." and fall through to leaving a previous install's symlink
+    # (and therefore an older library) in place.
+    VERSION_NO_V="$(lib_version_suffix "$VERSION" "$STAGE" "$LIB_NAME")" \
+        || err "Could not determine the packaged ${LIB_NAME} version from ${ARCHIVE}. The archive must contain exactly one ${LIB_NAME}.<version> file."
     LIB_VERSIONED="${LIB_NAME}.${VERSION_NO_V}"
 
     install_staged_tree "$STAGE" "$INSTALL_DIR"
@@ -871,19 +1014,36 @@ main() {
     fi
 }
 
-case "${1:-}" in
-    --uninstall|-u)
-        if [ -n "${FLYLINE_INSTALL_DIR:-}" ]; then
-            INSTALL_DIR="$(expand_path "$FLYLINE_INSTALL_DIR")"
-        elif [ -n "${FLYLINE_LOAD_DIR:-}" ]; then
-            INSTALL_DIR="$(expand_path "$FLYLINE_LOAD_DIR")"
-        fi
-        uninstall_main
-        ;;
-    --local|-l)
-        local_main "${2:-}"
-        ;;
-    *)
-        main "$@"
-        ;;
-esac
+# Tests source this script with FLYLINE_INSTALL_SH_LIB=1 to reach the helper
+# functions without installing anything. Executing it with the variable set
+# would otherwise be a silent no-op, so reject that instead.
+flyline_lib_mode=false
+if [ "${FLYLINE_INSTALL_SH_LIB:-}" = 1 ]; then
+    case "${0##*/}" in
+        install.sh | sh | bash | dash | ash | busybox)
+            err "FLYLINE_INSTALL_SH_LIB=1 only applies when install.sh is sourced by the test suite. Unset it to install."
+            ;;
+        *)
+            flyline_lib_mode=true
+            ;;
+    esac
+fi
+
+if ! $flyline_lib_mode; then
+    case "${1:-}" in
+        --uninstall|-u)
+            if [ -n "${FLYLINE_INSTALL_DIR:-}" ]; then
+                INSTALL_DIR="$(expand_path "$FLYLINE_INSTALL_DIR")"
+            elif [ -n "${FLYLINE_LOAD_DIR:-}" ]; then
+                INSTALL_DIR="$(expand_path "$FLYLINE_LOAD_DIR")"
+            fi
+            uninstall_main
+            ;;
+        --local|-l)
+            local_main "${2:-}"
+            ;;
+        *)
+            main "$@"
+            ;;
+    esac
+fi

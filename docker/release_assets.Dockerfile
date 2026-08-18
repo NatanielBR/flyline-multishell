@@ -7,7 +7,9 @@
 # /flyline-standalone (docker/builder.Dockerfile `flyline-zsh-integration-artifact`).
 #
 # Produced archive members (top level of the tarball):
-#   libflyline.so.<version_no_v>   (versioned loadable library)
+#   libflyline.so.<version_no_v>   (versioned loadable library; for `dev-*`
+#                                   versions <version_no_v> is the Cargo.toml
+#                                   version, matching the published archives)
 #   flyline-standalone             (standalone editor binary)
 #   scripts/flyline.zsh            (zsh integration script)
 #   scripts/flyline.fish           (fish integration script)
@@ -37,10 +39,22 @@ COPY scripts/flyline.fish ./scripts/flyline.fish
 COPY LICENSE-MIT ./LICENSE-MIT
 COPY LICENSE-GPLv3 ./LICENSE-GPLv3
 COPY UPSTREAM_BASE.toml ./UPSTREAM_BASE.toml
+# Only used to name the library for `dev-*` versions, which do not encode the
+# crate version in the tag.
+COPY Cargo.toml ./Cargo.toml
 
+# Keep the version-to-library mapping identical to lib_version_suffix() in
+# install.sh. `dev-*` snapshots name the library after Cargo.toml, so deriving
+# it from the tag here would produce an archive the installer rejects.
 RUN set -eu; \
     case "${FLYLINE_INSTALL_VERSION}" in \
         multishell-v*) version_no_v="${FLYLINE_INSTALL_VERSION#multishell-v}" ;; \
+        dev-*) \
+            version_no_v="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)"; \
+            if [ -z "${version_no_v}" ]; then \
+                echo "could not read the crate version from Cargo.toml" >&2; \
+                exit 1; \
+            fi ;; \
         v*) version_no_v="${FLYLINE_INSTALL_VERSION#v}" ;; \
         *) version_no_v="${FLYLINE_INSTALL_VERSION}" ;; \
     esac; \

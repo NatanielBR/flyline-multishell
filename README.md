@@ -62,6 +62,19 @@ configures Bash, zsh, and fish when available. No `sudo` is required. See the
 [releases page](https://github.com/conall88/flyline-multishell/releases) for
 specific versions and release notes.
 
+Set channel env vars on `sh`, not only on `curl`:
+
+```bash
+# Newest published product prerelease (never a dev-* snapshot)
+curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | FLYLINE_CHANNEL=prerelease sh
+
+# Newest published development snapshot
+curl -sSfL https://github.com/conall88/flyline-multishell/releases/latest/download/install.sh | FLYLINE_CHANNEL=dev sh
+```
+
+`FLYLINE_INSTALL_VERSION=<tag>` pins a specific release and wins over the channel.
+`releases/latest` still skips prereleases, so the default one-liner stays on stable.
+
 On macOS, zsh works with the system shell. To use the Bash builtin too, install
 a newer Bash that supports custom builtins: `brew install bash`.
 
