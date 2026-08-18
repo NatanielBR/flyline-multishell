@@ -780,7 +780,9 @@ main() {
     # integration is written as before.
     if $install_bash_integration && command -v bash >/dev/null 2>&1; then
         probe_status=0
-        probe_out="$(bash --norc -i -c 'enable -f "$1" flyline' \
+        # LC_ALL=C because the decision below reads Bash's own error text, which
+        # is translated under a localized locale.
+        probe_out="$(LC_ALL=C bash --norc -i -c 'enable -f "$1" flyline' \
             flyline-load-probe "$LIB_PATH" 2>&1)" || probe_status=$?
         if [ "$probe_status" -ne 0 ] && {
             [ "$probe_status" -ge 128 ] \
