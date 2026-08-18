@@ -692,21 +692,24 @@ jobs:
 
           # Generate a changelog only against the previous product release.
           # Documentation assets use their own `assets` release/tag and must
-          # never become the comparison base for a multishell release.
+          # never become the comparison base for a multishell release. Dev
+          # snapshots share this release list and can outnumber product
+          # releases, so page through it instead of reading only the newest 100.
           previous_tag=""
-          while IFS= read -r candidate; do
-            case "$candidate" in
-              multishell-v*)
-                if [ "$candidate" != "$TAG" ]; then
-                  previous_tag="$candidate"
-                  break
-                fi
-                ;;
-            esac
-          done <<EOF
-          $(gh release list --repo "$REPO" --limit 100 --json tagName,isDraft \
-            --jq '.[] | select(.isDraft == false) | .tagName')
-          EOF
+          page=1
+          page_limit=20
+          while [ "$page" -le "$page_limit" ]; do
+            page_tags="$(gh api "repos/${REPO}/releases?per_page=100&page=${page}" \
+              --jq '.[] | select(.draft == false) | .tag_name')"
+            [ -n "$page_tags" ] || break
+            previous_tag="$(printf '%s\n' "$page_tags" \
+              | grep -E '^multishell-v' | grep -vFx "$TAG" | head -1 || true)"
+            [ -z "$previous_tag" ] || break
+            page=$((page + 1))
+          done
+          if [ -z "$previous_tag" ]; then
+            echo "::notice::No previous multishell-v* release found; publishing without generated notes."
+          fi
 
           generated=""
           if [ -n "$previous_tag" ]; then
