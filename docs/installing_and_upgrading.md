@@ -74,6 +74,7 @@ You can customize the installation behavior by setting environment variables bef
 | `FLYLINE_LOAD_DIR` | Exported by an active `flyline` session. Used by the installer as the default upgrade directory. | *(none)* |
 | `FLYLINE_INSTALL_VERSION` | Pin a specific git tag. Wins over `FLYLINE_CHANNEL`. | *(unset)* |
 | `FLYLINE_CHANNEL` | `stable` (GitHub `releases/latest`), `prerelease` (newest published `multishell-v*` prerelease), or `dev` (newest published `dev-*` snapshot). Ignored when `FLYLINE_INSTALL_VERSION` is set. Must be set on `sh`, e.g. `curl … \| FLYLINE_CHANNEL=dev sh`. | `stable` |
+| `GITHUB_TOKEN` / `GH_TOKEN` | Sent as a bearer token when `FLYLINE_CHANNEL` is `prerelease` or `dev`, which resolve the tag through the GitHub releases API. Unauthenticated API requests are capped at 60/hour per IP, so set this on CI runners and shared networks. Unused by `stable` and by a pinned `FLYLINE_INSTALL_VERSION`. | *(none)* |
 
 ### Example Custom Installation
 To install version `multishell-v1.0.0` in a custom directory (`~/apps/lib`):

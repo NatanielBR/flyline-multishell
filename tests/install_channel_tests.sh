@@ -27,13 +27,46 @@ got="$(pick_release_tag_from_json dev < "$fixture")"
 got="$(pick_release_tag_from_json prerelease < "$fixture")"
 [ "$got" = "multishell-v9.1.0" ] || fail "prerelease channel picked '$got'"
 
-if pick_release_tag_from_json stable < "$fixture"; then
-    fail "stable channel should be rejected by the JSON picker"
-fi
+# Exit codes drive pagination and error reporting in get_channel_version, so
+# pin them: 1 no match on this page, 2 not a release list, 3 end of the list.
+picker_status() {
+    status=0
+    printf '%s' "$2" | pick_release_tag_from_json "$1" >/dev/null 2>&1 || status=$?
+    echo "$status"
+}
 
-if printf '%s' '[]' | pick_release_tag_from_json dev; then
-    fail "empty release list should fail"
-fi
+[ "$(picker_status stable "$(cat "$fixture")")" = 2 ] \
+    || fail "stable channel should be rejected by the JSON picker"
+[ "$(picker_status dev '[]')" = 3 ] \
+    || fail "empty release list should report end-of-list"
+[ "$(picker_status dev '[{"tag_name":"multishell-v9.1.0","draft":false,"prerelease":true}]')" = 1 ] \
+    || fail "page without a channel match should report no-match"
+[ "$(picker_status dev '{"message":"API rate limit exceeded"}')" = 2 ] \
+    || fail "API error object should be rejected, not reported as no-match"
+[ "$(picker_status dev 'not json')" = 2 ] \
+    || fail "invalid JSON should be rejected, not reported as no-match"
+
+# get_channel_version must walk pages: enough dev snapshots will push the newest
+# product prerelease off the first page of the releases API. Stub the fetch so
+# this stays offline.
+stub_page=""
+fetch_releases_page() {
+    case "$1" in
+        1) printf '%s' '[{"tag_name":"dev-19990101-bbbbbbb","draft":false,"prerelease":true}]' ;;
+        2) printf '%s' "$stub_page" ;;
+        *) printf '%s' '[]' ;;
+    esac
+}
+
+stub_page='[{"tag_name":"multishell-v9.4.0","draft":false,"prerelease":true}]'
+got="$(get_channel_version prerelease)"
+[ "$got" = "multishell-v9.4.0" ] || fail "paged prerelease lookup got '$got'"
+
+# Exhausting the pages is an error, not an empty version.
+stub_page='[]'
+status=0
+got="$(get_channel_version prerelease 2>/dev/null)" || status=$?
+[ "$status" != 0 ] || fail "exhausted release list should fail, got '$got'"
 
 # Prefix strip is a string transform; the X.Y.Z is unrelated to the crate.
 [ "$(lib_version_suffix "multishell-v9.8.7" /tmp libflyline.so)" = "9.8.7" ] \

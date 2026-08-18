@@ -108,62 +108,116 @@ get_latest_version() {
     echo "$version"
 }
 
-# Pick the newest published GitHub release tag for a channel from a releases
-# JSON array (stdin). python3 is only needed for FLYLINE_CHANNEL=dev|prerelease.
+# Pick the newest published GitHub release tag for a channel from one page of
+# releases JSON (stdin). python3 is only needed for FLYLINE_CHANNEL=dev|prerelease.
+# Exit codes: 0 printed a tag, 1 no match on this page, 2 the payload is not a
+# release list (API error object, rate-limit body, invalid JSON), 3 the page is
+# empty so the release list is exhausted.
 pick_release_tag_from_json() {
     channel="$1"
     python3 -c '
 import json, sys
 channel = sys.argv[1]
-releases = json.load(sys.stdin)
+try:
+    releases = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(2)
 if not isinstance(releases, list):
     raise SystemExit(2)
+if not releases:
+    raise SystemExit(3)
+if channel == "dev":
+    prefix = "dev-"
+elif channel == "prerelease":
+    prefix = "multishell-v"
+else:
+    raise SystemExit(2)
 for release in releases:
-    if release.get("draft"):
+    if not isinstance(release, dict) or release.get("draft"):
         continue
     tag = release.get("tag_name") or ""
-    prerelease = bool(release.get("prerelease"))
-    if channel == "dev":
-        if tag.startswith("dev-") and prerelease:
-            print(tag)
-            raise SystemExit(0)
-    elif channel == "prerelease":
-        if tag.startswith("multishell-v") and prerelease:
-            print(tag)
-            raise SystemExit(0)
-    else:
-        raise SystemExit(2)
+    if tag.startswith(prefix) and bool(release.get("prerelease")):
+        print(tag)
+        raise SystemExit(0)
 raise SystemExit(1)
 ' "$channel"
 }
 
+# Fetch one page of the releases API. Sends GITHUB_TOKEN/GH_TOKEN when set:
+# unauthenticated requests are capped at 60/hour per IP, which a CI runner or a
+# shared NAT can exhaust.
+fetch_releases_page() {
+    page="$1"
+    url="https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}"
+    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if command -v curl >/dev/null 2>&1; then
+        if [ -n "$token" ]; then
+            curl -sSfL --retry 5 --retry-delay 2 --retry-connrefused \
+                -H 'Accept: application/vnd.github+json' \
+                -H "Authorization: Bearer ${token}" "$url"
+        else
+            curl -sSfL --retry 5 --retry-delay 2 --retry-connrefused \
+                -H 'Accept: application/vnd.github+json' "$url"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if [ -n "$token" ]; then
+            wget -qO- --header='Accept: application/vnd.github+json' \
+                --header="Authorization: Bearer ${token}" "$url"
+        else
+            wget -qO- --header='Accept: application/vnd.github+json' "$url"
+        fi
+    else
+        err "Neither curl nor wget is available. Please install one and retry."
+    fi
+}
+
+# Resolve the release tag to install for a channel:
+#   stable      GitHub's releases/latest redirect (skips prereleases)
+#   prerelease  newest published multishell-v* prerelease
+#   dev         newest published dev-* snapshot
 get_channel_version() {
     channel="$1"
     case "$channel" in
         stable)
             get_latest_version
+            return
             ;;
-        dev|prerelease)
-            command -v python3 >/dev/null 2>&1 \
-                || err "FLYLINE_CHANNEL=${channel} needs python3, or set FLYLINE_INSTALL_VERSION to a tag."
-            api_url="https://api.github.com/repos/${REPO}/releases?per_page=100"
-            if command -v curl >/dev/null 2>&1; then
-                json="$(curl -sSfL -H 'Accept: application/vnd.github+json' "$api_url")"
-            elif command -v wget >/dev/null 2>&1; then
-                json="$(wget -qO- --header='Accept: application/vnd.github+json' "$api_url")"
-            else
-                err "Neither curl nor wget is available. Please install one and retry."
-            fi
-            if ! tag="$(printf '%s' "$json" | pick_release_tag_from_json "$channel")"; then
-                err "No published ${channel} release found for ${REPO}."
-            fi
-            [ -n "$tag" ] || err "No published ${channel} release found for ${REPO}."
-            echo "$tag"
-            ;;
+        dev | prerelease) : ;;
         *)
             err "Unknown FLYLINE_CHANNEL '${channel}'. Use stable, prerelease, or dev."
             ;;
     esac
+
+    command -v python3 >/dev/null 2>&1 \
+        || err "FLYLINE_CHANNEL=${channel} needs python3, or set FLYLINE_INSTALL_VERSION to a tag."
+
+    # Dev snapshots and product releases share one release list, so the newest
+    # release for a channel can sit past the first page once snapshots pile up.
+    page=1
+    page_limit=10
+    while :; do
+        json="$(fetch_releases_page "$page")" \
+            || err "Could not read the GitHub releases API for ${REPO}. Unauthenticated requests are capped at 60/hour per IP: set GITHUB_TOKEN, or pin FLYLINE_INSTALL_VERSION=<tag>."
+        status=0
+        tag="$(printf '%s' "$json" | pick_release_tag_from_json "$channel")" || status=$?
+        case "$status" in
+            0)
+                echo "$tag"
+                return 0
+                ;;
+            2)
+                err "Unexpected response from the GitHub releases API for ${REPO} (rate limited, or not a release list). Set GITHUB_TOKEN, or pin FLYLINE_INSTALL_VERSION=<tag>."
+                ;;
+            3)
+                break
+                ;;
+        esac
+        if [ "$page" -ge "$page_limit" ]; then
+            err "No published ${channel} release for ${REPO} in the newest $((page_limit * 100)) releases. Pin FLYLINE_INSTALL_VERSION=<tag> instead."
+        fi
+        page=$((page + 1))
+    done
+    err "No published ${channel} release found for ${REPO}."
 }
 
 # Version suffix of the packaged library (libflyline.so.<cargo version>).
