@@ -52,6 +52,53 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1 || err "Required command not found: $1"
 }
 
+# Drop the download staging area plus any half-copied files this run left in the
+# install directory, so an aborted install does not litter it.
+cleanup_install_tmp() {
+    if [ -n "${TMP_DIR:-}" ]; then
+        rm -rf "$TMP_DIR"
+    fi
+    if [ -n "${INSTALL_DIR:-}" ]; then
+        rm -f "${INSTALL_DIR}/.flyline-tmp.$$".* "${INSTALL_DIR}/scripts/.flyline-tmp.$$".*
+    fi
+    return 0
+}
+
+# Copy one file into place through a temp name in the destination directory, then
+# rename it. A rename cannot be observed or interrupted half-done, so a failed
+# install can never leave a partially written file where an existing
+# libflyline.<ext> symlink already points. That matters because a truncated
+# loadable library does not merely fail to load: Bash aborts with a bus error
+# while running ~/.bashrc, so every new terminal dies.
+install_file_atomic() {
+    src="$1"
+    dst="$2"
+    tmp="${dst%/*}/.flyline-tmp.$$.${dst##*/}"
+    cp "$src" "$tmp"
+    if [ -x "$src" ]; then
+        chmod +x "$tmp"
+    fi
+    mv -f "$tmp" "$dst"
+}
+
+# Install the unpacked archive tree into the destination, one atomic file at a
+# time. The body is a subshell so the recursive call cannot clobber the caller's
+# loop state.
+install_staged_tree() (
+    stage_dir="$1"
+    dest_dir="$2"
+    mkdir -p "$dest_dir"
+    for src in "$stage_dir"/* "$stage_dir"/.[!.]*; do
+        [ -e "$src" ] || continue
+        base="${src##*/}"
+        if [ -d "$src" ]; then
+            install_staged_tree "$src" "${dest_dir}/${base}"
+        else
+            install_file_atomic "$src" "${dest_dir}/${base}"
+        fi
+    done
+)
+
 download() {
     url="$1"
     dest="$2"
@@ -659,8 +706,7 @@ main() {
     fi
 
     TMP_DIR="$(mktemp -d)"
-    # shellcheck disable=SC2064
-    trap "rm -rf '$TMP_DIR'" EXIT
+    trap cleanup_install_tmp EXIT
 
     if [ -n "$FLYLINE_ASSET_BASE" ]; then
         say "Fetching ${ARCHIVE} from asset base ${FLYLINE_ASSET_BASE}..."
@@ -681,7 +727,11 @@ main() {
 
     mkdir -p "$INSTALL_DIR"
 
-    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$INSTALL_DIR"
+    # Unpack into a staging directory and copy from there, rather than unpacking
+    # straight over the files a previous install is still using.
+    STAGE="${TMP_DIR}/pkg"
+    mkdir -p "$STAGE"
+    tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$STAGE"
 
     case "$VERSION" in
         multishell-v*) VERSION_NO_V="${VERSION#multishell-v}" ;;
@@ -690,16 +740,21 @@ main() {
     esac
     LIB_VERSIONED="${LIB_NAME}.${VERSION_NO_V}"
 
+    install_staged_tree "$STAGE" "$INSTALL_DIR"
+
     if [ -f "${INSTALL_DIR}/${LIB_VERSIONED}" ]; then
         say "Creating symlink ${LIB_NAME} -> ${LIB_VERSIONED}..."
         rm -f "${INSTALL_DIR}/${LIB_NAME}"
         (cd "$INSTALL_DIR" && ln -s "$LIB_VERSIONED" "$LIB_NAME")
+    elif [ -f "${STAGE}/${LIB_NAME}" ]; then
+        # The archive itself shipped an unversioned library, which the copy above
+        # already put in place. Checking the staging directory rather than
+        # INSTALL_DIR keeps this distinct from a previous install's leftover
+        # symlink, which would otherwise satisfy the same test and leave the
+        # older library in use.
+        warn "Archive contains ${LIB_NAME} rather than ${LIB_VERSIONED}; using it as installed."
     else
-        if [ -f "${INSTALL_DIR}/${LIB_NAME}" ]; then
-            warn "Expected to find versioned library ${LIB_VERSIONED}, but found ${LIB_NAME} instead."
-        else
-            err "Failed to find the installed library file in ${INSTALL_DIR}."
-        fi
+        err "Failed to install ${LIB_VERSIONED} into ${INSTALL_DIR}."
     fi
 
     LIB_PATH="${INSTALL_DIR}/${LIB_NAME}"
@@ -711,6 +766,37 @@ main() {
 
     install_zsh_integration
     install_fish_integration
+
+    # A bad `enable -f` line in ~/.bashrc runs on every new interactive Bash, so
+    # look for evidence the builtin cannot load before writing it. The probe is a
+    # separate Bash process with --norc, so it reads no user config and cannot
+    # disturb the running shell. It needs -i because flyline deliberately
+    # declines to load in non-interactive shells, which makes the probe's exit
+    # status on its own a false negative for a perfectly good library.
+    #
+    # Only act on positive evidence of an unloadable library: a dlopen or symbol
+    # error, or the probe dying from a signal as it does on a truncated object.
+    # Anything else counts as a probe that could not draw a conclusion, and the
+    # integration is written as before.
+    if $install_bash_integration && command -v bash >/dev/null 2>&1; then
+        probe_status=0
+        # LC_ALL=C because the decision below reads Bash's own error text, which
+        # is translated under a localized locale.
+        probe_out="$(LC_ALL=C bash --norc -i -c 'enable -f "$1" flyline' \
+            flyline-load-probe "$LIB_PATH" 2>&1)" || probe_status=$?
+        if [ "$probe_status" -ne 0 ] && {
+            [ "$probe_status" -ge 128 ] \
+                || printf '%s' "$probe_out" \
+                    | grep -q 'cannot open shared object\|cannot find flyline_struct'
+        }; then
+            install_bash_integration=false
+            probe_detail="$(printf '%s' "$probe_out" | grep 'enable:' | head -1)"
+            warn "Bash could not load ${LIB_PATH}${probe_detail:+ (${probe_detail})}."
+            warn "Leaving ${BASHRC} unchanged so your terminals keep starting normally."
+            warn "Once the cause is resolved, enable it with:"
+            warn "    enable -f ${LIB_PATH} flyline"
+        fi
+    fi
 
     # Update or add 'enable -f ... flyline' in ~/.bashrc when this platform's
     # Bash can load the packaged builtin.

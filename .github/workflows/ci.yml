@@ -46,6 +46,17 @@ jobs:
             echo "trusted=false" >> "$GITHUB_OUTPUT"
           fi
 
+  install-resilience-tests:
+    name: Installer resilience
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Run installer resilience tests
+        run: sh tests/install_resilience_tests.sh
+
   build-ubuntu-1604:
     name: Build and test on Ubuntu 16.04
     runs-on: ubuntu-latest
