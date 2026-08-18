@@ -935,7 +935,22 @@ main() {
     fi
 }
 
-if [ "${FLYLINE_INSTALL_SH_LIB:-}" != 1 ]; then
+# Tests source this script with FLYLINE_INSTALL_SH_LIB=1 to reach the helper
+# functions without installing anything. Executing it with the variable set
+# would otherwise be a silent no-op, so reject that instead.
+flyline_lib_mode=false
+if [ "${FLYLINE_INSTALL_SH_LIB:-}" = 1 ]; then
+    case "${0##*/}" in
+        install.sh | sh | bash | dash | ash | busybox)
+            err "FLYLINE_INSTALL_SH_LIB=1 only applies when install.sh is sourced by the test suite. Unset it to install."
+            ;;
+        *)
+            flyline_lib_mode=true
+            ;;
+    esac
+fi
+
+if ! $flyline_lib_mode; then
     case "${1:-}" in
         --uninstall|-u)
             if [ -n "${FLYLINE_INSTALL_DIR:-}" ]; then
