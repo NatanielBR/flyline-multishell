@@ -1007,6 +1007,13 @@ impl<'a> App<'a> {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                // Copy-on-select: the terminal's own Cmd+C never sees a
+                // selection made while flyline captures the mouse.
+                if matches!(self.mouse_state.drag_start_tag, Some(Tag::Command(_))) {
+                    if let Some(text) = self.buffer.selected_text() {
+                        self.copy_to_clipboard(text.as_bytes());
+                    }
+                }
                 self.mouse_state.set_left_button_up();
                 self.mouse_state.set_left_button_dragging(false);
                 self.mouse_state.drag_start_tag = None;
