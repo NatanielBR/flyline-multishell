@@ -804,10 +804,23 @@ impl<'a> App<'a> {
         // frame on screen printed the command twice, so hand the rows back to ZLE
         // (clear() also parks the cursor at the viewport origin = ZLE's prompt row).
         if crate::shell::is_zsh_host_env()
-            && matches!(self.mode, AppRunningState::Exiting(ExitState::WithCommand(_)))
+            && matches!(
+                self.mode,
+                AppRunningState::Exiting(ExitState::WithCommand(_))
+            )
         {
+            let origin = terminal.get_frame().area().as_position();
             terminal.clear().unwrap_or_else(|e| {
                 log::error!("Failed to clear inline viewport on exit: {}", e);
+            });
+            // clear() restores the pre-clear cursor (a row below the prompt after
+            // the accept frame); park it back on ZLE's prompt row.
+            crossterm::execute!(
+                std::io::stdout(),
+                crossterm::cursor::MoveTo(origin.x, origin.y)
+            )
+            .unwrap_or_else(|e| {
+                log::error!("Failed to park cursor on prompt row: {}", e);
             });
         }
 

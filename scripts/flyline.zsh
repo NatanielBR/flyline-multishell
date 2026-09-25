@@ -20,6 +20,7 @@ flyline() {
 
 _flyline_edit() {
   local last_exit=$?   # capture before emulate/anything clobbers $?
+  local subst=0; [[ -o promptsubst ]] && subst=1   # emulate resets it
   emulate -L zsh
   [[ -x $FLYLINE_BIN ]] || return 0   # fail open
 
@@ -27,12 +28,15 @@ _flyline_edit() {
   fc -AI 2>/dev/null || true
 
   # Hand flyline a prompt-format string it can `print -Pn` (don't pre-expand `%`;
-  # that mangles starship's %{...%}). starship renders via its CLI; templates we
-  # can't resolve here ($(...)/${...}, e.g. p10k) fall back to a minimal prompt.
+  # that mangles starship's %{...%}). starship renders via its CLI; with
+  # prompt_subst (oh-my-zsh themes) resolve $(...)/${...} here, where the theme's
+  # functions live, leaving % escapes for flyline. Anything left falls back.
   local fly_ps1=$PROMPT fly_rps1=$RPROMPT
   if (( $+commands[starship] )) && [[ $PROMPT == *starship* ]]; then
     fly_ps1="$(starship prompt --terminal-width=$COLUMNS --status=$last_exit 2>/dev/null)"
     fly_rps1="$(starship prompt --right --terminal-width=$COLUMNS --status=$last_exit 2>/dev/null)"
+  elif (( subst )); then
+    fly_ps1=${(e)PROMPT} fly_rps1=${(e)RPROMPT}
   fi
   [[ $fly_ps1 == *'${'* || $fly_ps1 == *'$('* || -z $fly_ps1 ]] && fly_ps1='%n@%m %1~ %# '
   [[ $fly_rps1 == *'${'* || $fly_rps1 == *'$('* ]] && fly_rps1=''
@@ -55,11 +59,17 @@ _flyline_edit() {
     # (guarding on a non-empty buffer left blank Enter stuck in native ZLE).
     #
     # Flyline clears its viewport on accept and leaves the cursor on the
-    # prompt row. ZLE still redraws prompt+BUFFER when the line finishes;
-    # reset-prompt makes that a full redraw from the prompt start, so the
-    # command appears exactly once, with the native prompt.
+    # prompt row (col 0, row blanked). For a non-empty line, reset-prompt
+    # makes ZLE paint prompt+BUFFER once from that row. For an empty line
+    # ZLE sees nothing changed and repaints nothing, leaving a blank row per
+    # Enter — so repaint the prompt ourselves (cursor ends where ZLE expects
+    # it: after the prompt) and let accept-line add the newline, like native.
     BUFFER=$cmd
-    zle .reset-prompt
+    if [[ -n $BUFFER ]]; then
+      zle .reset-prompt
+    else
+      print -Pn -- "$fly_ps1" >/dev/tty
+    fi
     zle .accept-line
     return 0
   elif (( rc == 130 )); then

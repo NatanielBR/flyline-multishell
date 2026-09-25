@@ -711,7 +711,10 @@ impl ShellBackend for ZshBackend {
         unsafe {
             std::env::set_var("_FLYLINE_PROMPT", raw);
         }
-        let decoded = zsh_eval("emulate -L zsh; print -Pn -- \"$_FLYLINE_PROMPT\"");
+        // Restore $? so %(?..) prompt conditionals see the real last exit.
+        let decoded = zsh_eval(
+            "emulate -L zsh; (exit ${FLYLINE_LAST_EXIT:-0}); print -Pn -- \"$_FLYLINE_PROMPT\"",
+        );
         unsafe {
             std::env::remove_var("_FLYLINE_PROMPT");
         }

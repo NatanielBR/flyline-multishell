@@ -7,3 +7,4 @@ docker_build/
 .vscode/
 docker/build-release-assets/*.tar.gz
 docker/build-release-assets/*.sha256
+.empryo
