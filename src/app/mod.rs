@@ -799,6 +799,18 @@ impl<'a> App<'a> {
             bash_symbols::clear_readline_state(bash_symbols::RL_STATE_TERMPREPPED);
         }
 
+        // zsh: ZLE still owns the prompt row our inline viewport started on and
+        // redraws prompt+BUFFER when the accepted line finishes. Leaving our final
+        // frame on screen printed the command twice, so hand the rows back to ZLE
+        // (clear() also parks the cursor at the viewport origin = ZLE's prompt row).
+        if crate::shell::is_zsh_host_env()
+            && matches!(self.mode, AppRunningState::Exiting(ExitState::WithCommand(_)))
+        {
+            terminal.clear().unwrap_or_else(|e| {
+                log::error!("Failed to clear inline viewport on exit: {}", e);
+            });
+        }
+
         match self.mode {
             AppRunningState::Exiting(ExitState::WithCommand(cmd)) => {
                 if self.settings.send_shell_integration_codes

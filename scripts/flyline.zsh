@@ -53,8 +53,13 @@ _flyline_edit() {
   if (( rc == 0 )); then
     # Accept even when empty, so line-init re-fires and relaunches flyline
     # (guarding on a non-empty buffer left blank Enter stuck in native ZLE).
+    #
+    # Flyline clears its viewport on accept and leaves the cursor on the
+    # prompt row. ZLE still redraws prompt+BUFFER when the line finishes;
+    # reset-prompt makes that a full redraw from the prompt start, so the
+    # command appears exactly once, with the native prompt.
     BUFFER=$cmd
-    zle .redisplay
+    zle .reset-prompt
     zle .accept-line
     return 0
   elif (( rc == 130 )); then
