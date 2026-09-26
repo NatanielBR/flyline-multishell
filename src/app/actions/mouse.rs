@@ -154,7 +154,7 @@ pub enum MouseContextVar {
     OverCellSemantically(TagPattern),
     NotOverCellSemantically(TagPattern),
     OverCellDirectly(TagPattern),
-    SmartModeClickAboveViewport,
+    SmartModePointerAboveViewport,
     SmartModeScroll,
     IsOverSuggestions,
     IsOverFuzzyHistory,
@@ -228,10 +228,12 @@ impl super::ContextVar for MouseContextVar {
             MouseContextVar::OverCellSemantically(pattern) => pattern.matches(clicked_tag),
             MouseContextVar::NotOverCellSemantically(pattern) => !pattern.matches(clicked_tag),
             MouseContextVar::OverCellDirectly(pattern) => pattern.matches(direct_tag),
-            MouseContextVar::SmartModeClickAboveViewport => {
+            // Release on hover too: a Down we consume never reaches the terminal,
+            // so disabling on click alone would swallow the start of a native selection.
+            MouseContextVar::SmartModePointerAboveViewport => {
                 app.settings.mouse_mode == MouseMode::Smart
                     && last_mouse.is_some_and(|m| {
-                        matches!(m.kind, MouseEventKind::Down(_))
+                        matches!(m.kind, MouseEventKind::Down(_) | MouseEventKind::Moved)
                             && app
                                 .last_contents
                                 .as_ref()
@@ -537,6 +539,12 @@ pub static DEFAULT_MOUSE_BINDINGS: LazyLock<Vec<MouseBinding>> = LazyLock::new(|
                 + MouseContextVar::OverCellSemantically(TagPattern::FlycompDontAsk),
             action: MouseEventAction::FlycompSelectDontAsk,
         },
+        // Smart mode pointer above viewport -> Disable mouse capture.
+        // Must precede the generic hover bindings, which would otherwise claim the Moved event.
+        MouseBinding {
+            context: ContextExpr::from(MouseContextVar::SmartModePointerAboveViewport),
+            action: MouseEventAction::DisableMouseCapture,
+        },
         // Hovering selection updates
         MouseBinding {
             context: MouseContextVar::TabCompletion
@@ -667,13 +675,9 @@ pub static DEFAULT_MOUSE_BINDINGS: LazyLock<Vec<MouseBinding>> = LazyLock::new(|
                 + MouseContextVar::OverCellSemantically(TagPattern::PromptCopyBuffer),
             action: MouseEventAction::ClickPromptCopyBuffer,
         },
-        // Smart mode viewport click or scroll -> Disable mouse capture
+        // Smart mode scroll -> Disable mouse capture
         MouseBinding {
             context: ContextExpr::from(MouseContextVar::SmartModeScroll),
-            action: MouseEventAction::DisableMouseCapture,
-        },
-        MouseBinding {
-            context: ContextExpr::from(MouseContextVar::SmartModeClickAboveViewport),
             action: MouseEventAction::DisableMouseCapture,
         },
         // Pointer shape updating at the end of the matching sequence
@@ -1237,6 +1241,7 @@ impl MouseEventAction {
                 app.mouse_state.disable();
                 app.mouse_state.last_mouse_over_cell_semantic = None;
                 app.mouse_state.last_mouse_over_cell_direct = None;
+                app.tooltip = None;
                 MouseActionOutput::dont_update()
             }
             MouseEventAction::RightClickMenuOpen => {

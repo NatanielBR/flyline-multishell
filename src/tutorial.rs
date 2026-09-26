@@ -375,7 +375,7 @@ pub fn generate_tutorial_text(
             )));
             lines.push(empty());
             lines.push(TaggedLine::from(vec![ts_text(
-                "Disable mouse capture: click above the viewport or scroll.",
+                "Disable mouse capture: move the mouse above the viewport or scroll.",
             )]));
             lines.push(TaggedLine::from(vec![
                 ts_text("Toggle with "),
